@@ -1,0 +1,1794 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#1a2332">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>基金追蹤</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"></script>
+<style>
+:root{
+  --bg:#f4f6f9; --panel:#ffffff; --panel2:#eef1f5; --border:#d8dee8;
+  --text:#1c2430; --muted:#6b7686; --accent:#2563eb;
+  --up:#16a34a; --down:#dc2626; --flat:#6b7686;
+  --rsp:#f59e0b; --lump:#3b82f6;
+  --sel:#dbe7ff; --hover:#edf2fa;
+}
+[data-theme="dark"]{
+  --bg:#0f1622; --panel:#1a2332; --panel2:#141c29; --border:#2a3850;
+  --text:#e4eaf3; --muted:#8b99ad; --accent:#4f8cff;
+  --up:#22c55e; --down:#ef4444; --flat:#8b99ad;
+  --sel:#24395e; --hover:#202d44;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:"Segoe UI","Microsoft JhengHei",system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:14px;display:flex;flex-direction:column;overflow:hidden}
+button{font-family:inherit;cursor:pointer}
+/* ===== Header ===== */
+header{background:var(--panel);border-bottom:1px solid var(--border);padding:8px 14px;flex:none}
+.hd-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.hd-top h1{font-size:17px;font-weight:700;margin-right:4px}
+.hd-top .spacer{flex:1}
+.btn{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 11px;font-size:13px;white-space:nowrap}
+.btn:hover{background:var(--hover)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn:disabled{opacity:.5;cursor:default}
+.summary{display:flex;gap:18px;margin-top:7px;flex-wrap:wrap}
+.sum-item{display:flex;flex-direction:column;min-width:100px}
+.sum-item .lbl{font-size:11px;color:var(--muted)}
+.sum-item .val{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
+.pos{color:var(--up)} .neg{color:var(--down)} .flat{color:var(--flat)}
+#updStatus{font-size:11px;color:var(--muted);margin-left:auto;align-self:flex-end}
+/* ===== Table ===== */
+#tableWrap{flex:1 1 55%;overflow:auto;background:var(--panel);min-height:120px}
+table{width:100%;border-collapse:collapse;white-space:nowrap}
+thead th{position:sticky;top:0;background:var(--panel2);border-bottom:1px solid var(--border);padding:6px 9px;font-size:12px;color:var(--muted);font-weight:600;cursor:pointer;user-select:none;z-index:2;text-align:right}
+thead th:first-child{text-align:left}
+thead th .arr{font-size:9px}
+tbody td{padding:6px 9px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums}
+tbody td:first-child{text-align:left;max-width:240px;overflow:hidden;text-overflow:ellipsis}
+tbody tr{cursor:pointer}
+tbody tr:hover{background:var(--hover)}
+tbody tr.sel{background:var(--sel)}
+.unitsCell{text-decoration:underline dotted;text-underline-offset:3px}
+.rowBtns{display:inline-flex;gap:4px}
+.rowBtns button{border:1px solid var(--border);background:var(--panel2);color:var(--text);border-radius:4px;font-size:11px;padding:2px 6px}
+.subTxt{font-size:11px;color:var(--muted)}
+#emptyHint{padding:34px;text-align:center;color:var(--muted)}
+#emptyHint .big{font-size:15px;margin-bottom:8px}
+/* ===== Chart area ===== */
+#chartArea{flex:1 1 45%;display:flex;flex-direction:column;background:var(--panel);border-top:2px solid var(--border);min-height:200px}
+#chartBar{display:flex;align-items:center;gap:4px;padding:6px 10px;flex-wrap:wrap;border-bottom:1px solid var(--border)}
+#chartTitle{font-size:13px;font-weight:700;margin-right:6px;max-width:330px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tabs{display:flex;gap:3px;flex-wrap:wrap}
+.tab{border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:12px;border-radius:5px;padding:3px 8px}
+.tab.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.tab:disabled{opacity:.35;cursor:default}
+#chartWrap{flex:1;position:relative;padding:4px 8px 2px}
+#chartCanvas{position:absolute;inset:4px 8px 2px}
+#chartHint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);pointer-events:none}
+/* ===== Status bar ===== */
+#statusBar{flex:none;background:var(--panel2);border-top:1px solid var(--border);padding:4px 14px;font-size:12px;color:var(--muted);display:flex;gap:16px;flex-wrap:wrap}
+#statusBar b{font-variant-numeric:tabular-nums}
+/* ===== Dialogs ===== */
+dialog{border:1px solid var(--border);border-radius:10px;background:var(--panel);color:var(--text);padding:0;max-width:min(560px,94vw);width:520px;max-height:88vh}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+.dlgHead{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border);font-weight:700}
+.dlgBody{padding:14px 16px;overflow:auto;max-height:64vh}
+.dlgFoot{padding:10px 16px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}
+.xBtn{background:none;border:none;color:var(--muted);font-size:18px}
+.field{margin-bottom:11px}
+.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+input[type=text],input[type=number],input[type=date],select{width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--panel2);color:var(--text);font-size:14px;font-family:inherit}
+input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.row2{display:flex;gap:10px}.row2>.field{flex:1}
+.radioRow{display:flex;gap:14px;padding:4px 0}
+.radioRow label{display:flex;align-items:center;gap:5px;font-size:14px;cursor:pointer}
+#searchResults{border:1px solid var(--border);border-radius:6px;max-height:230px;overflow:auto;margin-top:6px}
+.sr-item{padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;gap:8px;align-items:center}
+.sr-item:last-child{border-bottom:none}
+.sr-item:hover{background:var(--hover)}
+.sr-item .nm{font-size:13px}
+.sr-item .meta{font-size:11px;color:var(--muted)}
+.sr-item .px{font-variant-numeric:tabular-nums;font-size:13px;text-align:right;flex:none}
+.navRow{display:flex;gap:6px}
+.navRow input{flex:1}
+#purTable,#divTable{width:100%;border-collapse:collapse;font-size:13px}
+#purTable th,#divTable th{font-size:11px;color:var(--muted);text-align:right;padding:4px 6px;border-bottom:1px solid var(--border)}
+#purTable th:first-child,#divTable th:first-child{text-align:left}
+#purTable td,#divTable td{padding:5px 6px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums}
+#purTable td:first-child,#divTable td:first-child{text-align:left}
+#purTable .act button,#divTable .act button{border:none;background:none;font-size:14px;cursor:pointer;padding:1px 4px}
+.secHead{font-weight:700;margin-bottom:6px}
+.planRow{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);border-radius:6px;padding:6px 9px;margin-bottom:6px;font-size:13px;gap:8px;flex-wrap:wrap}
+.planRow .off{opacity:.55}
+#csvPrev table{width:100%;border-collapse:collapse;font-size:12px;white-space:nowrap}
+#csvPrev th,#csvPrev td{border-bottom:1px solid var(--border);padding:4px 6px;text-align:left}
+#csvPrev select{padding:3px 5px;font-size:12px;max-width:240px;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:4px}
+.st-ok{color:var(--up)} .st-dup{color:var(--muted)} .st-err{color:var(--down)}
+.totRow{font-weight:700}
+.badge{font-size:10px;border-radius:4px;padding:1px 5px;color:#fff;display:inline-block}
+.badge.RSP{background:var(--rsp)} .badge.LUMP{background:var(--lump)}
+.note{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.5}
+#toast{position:fixed;bottom:46px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:8px 18px;border-radius:20px;font-size:13px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:99;max-width:90vw}
+#toast.show{opacity:.93}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid var(--muted);border-top-color:transparent;border-radius:50%;animation:sp 0.8s linear infinite;vertical-align:-2px}
+@keyframes sp{to{transform:rotate(360deg)}}
+/* mobile */
+@media (max-width:640px){
+  body{font-size:13px}
+  .hd-top h1{font-size:15px}
+  .summary{gap:10px}
+  .sum-item{min-width:84px}
+  .sum-item .val{font-size:14px}
+  thead th,tbody td{padding:5px 6px;font-size:12px}
+  #chartTitle{max-width:100%}
+  dialog{width:94vw}
+}
+</style>
+</head>
+<body data-theme="light">
+
+<header>
+  <div class="hd-top">
+    <h1>📈 基金追蹤</h1>
+    <button class="btn primary" id="btnAdd">＋ 新增基金</button>
+    <button class="btn" id="btnRefresh">⟳ 更新</button>
+    <span class="spacer"></span>
+    <button class="btn" id="btnExport" title="匯出 JSON">匯出</button>
+    <button class="btn" id="btnImport" title="匯入 JSON">匯入</button>
+    <button class="btn" id="btnCsv" title="從 CSV 批次匯入買入/配息記錄">CSV</button>
+    <button class="btn" id="btnTheme" title="切換主題">🌓</button>
+  </div>
+  <div class="summary">
+    <div class="sum-item"><span class="lbl">總投資成本 (TWD)</span><span class="val" id="sumCost">—</span></div>
+    <div class="sum-item"><span class="lbl">總現值 (TWD)</span><span class="val" id="sumValue">—</span></div>
+    <div class="sum-item"><span class="lbl">累計配息</span><span class="val" id="sumDiv">—</span></div>
+    <div class="sum-item"><span class="lbl">總損益(含息)</span><span class="val" id="sumPL">—</span></div>
+    <div class="sum-item"><span class="lbl">總報酬率(含息)</span><span class="val" id="sumPct">—</span></div>
+    <div class="sum-item"><span class="lbl">年化(XIRR)</span><span class="val" id="sumXirr">—</span></div>
+    <span id="updStatus"></span>
+  </div>
+</header>
+
+<div id="tableWrap">
+  <table id="fundTable">
+    <thead><tr>
+      <th data-k="name">基金名稱 <span class="arr"></span></th>
+      <th data-k="nav">最新淨值 <span class="arr"></span></th>
+      <th data-k="navDate">淨值日 <span class="arr"></span></th>
+      <th data-k="dayChg">當日漲跌 <span class="arr"></span></th>
+      <th data-k="units">持有單位 <span class="arr"></span></th>
+      <th data-k="cost">持有成本 <span class="arr"></span></th>
+      <th data-k="value">現值 <span class="arr"></span></th>
+      <th data-k="pl" title="含配息">損益 <span class="arr"></span></th>
+      <th data-k="div" title="累計配息（計價幣別）">配息 <span class="arr"></span></th>
+      <th data-k="plPct" title="（現值＋配息－成本）/ 成本">報酬率 <span class="arr"></span></th>
+      <th data-k="rangePct">區間報酬 <span class="arr"></span></th>
+      <th>操作</th>
+    </tr></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+  <div id="emptyHint" hidden>
+    <div class="big">尚未加入任何基金</div>
+    <div>點擊上方「＋ 新增基金」搜尋並加入您的投資組合</div>
+  </div>
+</div>
+
+<div id="chartArea">
+  <div id="chartBar">
+    <span id="chartTitle">—</span>
+    <div class="tabs" id="rangeTabs"></div>
+    <span class="spacer" style="flex:1"></span>
+    <button class="tab" id="btnPortfolio" title="整體投資組合走勢">📊 組合</button>
+    <button class="tab" id="modeToggle" title="切換 % / 淨值">%</button>
+  </div>
+  <div id="chartWrap">
+    <canvas id="chartCanvas"></canvas>
+    <div id="chartHint">選擇基金以顯示走勢圖</div>
+  </div>
+</div>
+
+<div id="statusBar">
+  <span>總投資 <b id="sbCost">—</b></span>
+  <span>總損益 <b id="sbPL">—</b></span>
+  <span id="sbSel"></span>
+</div>
+
+<!-- ===== 新增基金 Dialog ===== -->
+<dialog id="dlgAdd">
+  <div class="dlgHead"><span id="dlgAddTitle">新增基金</span><button class="xBtn" data-close="dlgAdd">✕</button></div>
+  <div class="dlgBody">
+    <div id="addStep1">
+      <div class="field">
+        <label>搜尋基金（輸入名稱關鍵字或 ISIN）</label>
+        <input type="text" id="searchInput" placeholder="例：統一奔騰、安聯收益成長" autocomplete="off">
+      </div>
+      <div id="searchStatus" class="subTxt"></div>
+      <div id="searchResults" hidden></div>
+      <div class="note">資料來源：Morningstar（涵蓋台灣核備之境內外基金）。輸入後自動搜尋。</div>
+    </div>
+    <div id="addStep2" hidden>
+      <div class="field"><label>已選基金</label><div id="pickedFund" style="font-weight:700"></div></div>
+      <div class="field"><label>買入類型</label>
+        <div class="radioRow">
+          <label><input type="radio" name="pType" value="RSP" checked> 定期定額</label>
+          <label><input type="radio" name="pType" value="LUMP"> 單筆買入</label>
+        </div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>買入日期</label><input type="date" id="pDate"></div>
+        <div class="field"><label>買入金額（計價幣別）</label><input type="number" id="pAmt" min="0" step="any" placeholder="例：3000"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>手續費（選填）</label><input type="number" id="pFee" min="0" step="any" placeholder="0"></div>
+        <div class="field"><label>買入單位數</label><input type="number" id="pUnits" min="0" step="any" placeholder="填金額自動換算"></div>
+      </div>
+      <div class="field"><label>買入淨值（基金計價幣別）</label>
+        <div class="navRow">
+          <input type="number" id="pNav" min="0" step="any" placeholder="可手動輸入">
+          <button class="btn" id="btnNavLookup">查詢</button>
+        </div>
+      </div>
+      <div class="field"><label>備註</label><input type="text" id="pNote" placeholder="選填"></div>
+    </div>
+  </div>
+  <div class="dlgFoot">
+    <button class="btn" data-close="dlgAdd">取消</button>
+    <button class="btn" id="btnBackSearch" hidden>← 重新搜尋</button>
+    <button class="btn primary" id="btnConfirmAdd" hidden>確認新增</button>
+  </div>
+</dialog>
+
+<!-- ===== 買入記錄管理 Dialog ===== -->
+<dialog id="dlgMng">
+  <div class="dlgHead"><span id="mngTitle">買入記錄</span><button class="xBtn" data-close="dlgMng">✕</button></div>
+  <div class="dlgBody">
+    <div class="subTxt" id="mngXirr" style="margin-bottom:8px"></div>
+    <table id="purTable">
+      <thead><tr><th>類型</th><th>日期</th><th>金額</th><th>單位數</th><th>買入淨值</th><th>備註</th><th></th></tr></thead>
+      <tbody id="purBody"></tbody>
+    </table>
+    <div style="margin-top:10px;text-align:right"><button class="btn" id="btnAddPur">＋ 新增記錄</button></div>
+    <div id="purEdit" hidden style="border-top:1px solid var(--border);margin-top:12px;padding-top:12px">
+      <div style="font-weight:700;margin-bottom:8px" id="purEditTitle">新增記錄</div>
+      <div class="field"><label>買入類型</label>
+        <div class="radioRow">
+          <label><input type="radio" name="eType" value="RSP" checked> 定期定額</label>
+          <label><input type="radio" name="eType" value="LUMP"> 單筆買入</label>
+        </div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>買入日期</label><input type="date" id="eDate"></div>
+        <div class="field"><label>買入金額（計價幣別）</label><input type="number" id="eAmt" min="0" step="any" placeholder="例：3000"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>手續費（選填）</label><input type="number" id="eFee" min="0" step="any" placeholder="0"></div>
+        <div class="field"><label>買入單位數</label><input type="number" id="eUnits" min="0" step="any" placeholder="填金額自動換算"></div>
+      </div>
+      <div class="field"><label>買入淨值</label>
+        <div class="navRow"><input type="number" id="eNav" min="0" step="any"><button class="btn" id="btnENavLookup">查詢</button></div>
+      </div>
+      <div class="field"><label>備註</label><input type="text" id="eNote"></div>
+      <div style="text-align:right;display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn" id="btnPurCancel">取消</button>
+        <button class="btn primary" id="btnPurSave">儲存</button>
+      </div>
+    </div>
+
+    <div style="border-top:2px solid var(--border);margin-top:14px;padding-top:10px">
+      <div class="secHead">💰 配息記錄 <span class="subTxt" id="divSum"></span></div>
+      <table id="divTable">
+        <thead><tr><th>配息日</th><th>金額</th><th>備註</th><th></th></tr></thead>
+        <tbody id="divBody"></tbody>
+      </table>
+      <div style="margin-top:8px;text-align:right"><button class="btn" id="btnAddDiv">＋ 新增配息</button></div>
+      <div id="divEdit" hidden style="border-top:1px solid var(--border);margin-top:10px;padding-top:10px">
+        <div class="row2">
+          <div class="field"><label>配息日</label><input type="date" id="eDivDate"></div>
+          <div class="field"><label>實領金額（計價幣別）</label><input type="number" id="eDivAmt" min="0" step="any"></div>
+        </div>
+        <div class="field"><label>備註</label><input type="text" id="eDivNote" placeholder="選填"></div>
+        <div style="text-align:right;display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn" id="btnDivCancel">取消</button>
+          <button class="btn primary" id="btnDivSave">儲存</button>
+        </div>
+      </div>
+      <div class="note">配息選「再投入」者：記一筆配息＋一筆同金額的買入記錄，報酬即計算正確。</div>
+    </div>
+
+    <div style="border-top:2px solid var(--border);margin-top:14px;padding-top:10px">
+      <div class="secHead">🔁 定期定額排程</div>
+      <div id="rspList"></div>
+      <div class="row2">
+        <div class="field"><label>每月扣款日（1–31）</label><input type="number" id="rspDay" min="1" max="31" step="1" placeholder="例：6"></div>
+        <div class="field"><label>每期金額（計價幣別）</label><input type="number" id="rspAmt" min="0" step="any" placeholder="例：3000"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>每期手續費（選填）</label><input type="number" id="rspFee" min="0" step="any" placeholder="0"></div>
+        <div class="field"><label>開始日期</label><input type="date" id="rspStart"></div>
+      </div>
+      <div style="text-align:right"><button class="btn primary" id="btnRspAdd">＋ 新增排程</button></div>
+      <div class="note">開啟 App 或點「⟳ 更新」時，會自動依排程用扣款日（假日順延至次一營業日）的淨值補上買入記錄。</div>
+    </div>
+  </div>
+  <div class="dlgFoot"><button class="btn" data-close="dlgMng">關閉</button></div>
+</dialog>
+
+<!-- ===== 自訂區間 Dialog ===== -->
+<dialog id="dlgRange">
+  <div class="dlgHead"><span>自訂時間區間</span><button class="xBtn" data-close="dlgRange">✕</button></div>
+  <div class="dlgBody">
+    <div class="row2">
+      <div class="field"><label>開始日期</label><input type="date" id="crStart"></div>
+      <div class="field"><label>結束日期</label><input type="date" id="crEnd"></div>
+    </div>
+  </div>
+  <div class="dlgFoot">
+    <button class="btn" data-close="dlgRange">取消</button>
+    <button class="btn primary" id="btnRangeOk">套用</button>
+  </div>
+</dialog>
+
+<!-- ===== CSV 匯入 Dialog ===== -->
+<dialog id="dlgCsv" style="width:min(820px,96vw);max-width:96vw">
+  <div class="dlgHead"><span>CSV 匯入 / 匯出</span><button class="xBtn" data-close="dlgCsv">✕</button></div>
+  <div class="dlgBody">
+    <div class="field">
+      <label>匯入：選擇 CSV 檔案（UTF-8 或 Big5 編碼皆可，自動辨識格式）</label>
+      <div class="navRow">
+        <button class="btn" id="btnCsvPick">📂 選擇檔案…</button>
+        <button class="btn" id="btnCsvTpl">⬇ 交易格式範本</button>
+        <button class="btn" id="btnCsvExport">⬆ 匯出報表（基富通格式）</button>
+      </div>
+    </div>
+    <div class="note">支援兩種格式自動辨識：<br>
+      ① <b>基富通投資總覽匯出報表</b>——網站「投資總覽 → 匯出報表」下載的 CSV 直接匯入，每支基金以平均申購淨值記一筆彙總，累積配息一併帶入。<br>
+      ② <b>逐筆交易格式</b>——欄位：基金（名稱或 ISIN）、類型（定期定額／單筆／配息）、日期、金額、單位數*、淨值*（空白自動查）、手續費*、備註*（*選填）。<br>
+      皆為合併匯入，重複記錄自動略過。</div>
+    <div id="csvStatus" class="subTxt" style="margin:8px 0"></div>
+    <div id="csvPrev" style="overflow:auto;max-height:44vh"></div>
+  </div>
+  <div class="dlgFoot">
+    <button class="btn" data-close="dlgCsv">取消</button>
+    <button class="btn primary" id="btnCsvOk" disabled>確認匯入</button>
+  </div>
+</dialog>
+
+<input type="file" id="csvFile" accept=".csv,text/csv" hidden>
+<input type="file" id="importFile" accept=".json,application/json" hidden>
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* ================================================================
+   基金追蹤 — 單檔 PWA（v1.1）
+   資料來源（已驗證 2026-06-11，CORS 全開放，免金鑰）：
+   1. Morningstar screener  : 基金搜尋 + 最新淨值（境內外台灣核備基金）
+   2. Morningstar timeseries: 每日淨值歷史（約 10 年）
+   3. TDCC OpenAPI 3-4      : 境外基金淨值（備援）
+   v1.1 新增：金額買入(含手續費)、定期定額排程自動補記錄、
+              配息記錄與含息報酬、投資組合走勢圖、XIRR 年化、CSV 批次匯入
+   ================================================================ */
+
+/* ---------------- 常數 / 工具 ---------------- */
+const MS_TOKEN = "9vehuxllxs";
+const MS_BASE  = "https://lt.morningstar.com/api/rest.svc";
+const UNIVERSE = "FOTWN$$ALL";
+const LS_H = "fund_tracker_holdings";
+const LS_S = "fund_tracker_settings";
+const LS_FX = "fund_tracker_fx";
+const NAV_PREFIX = "fund_tracker_nav_cache_";
+const MAX_HIST = 3650; // 約 10 年
+
+const $ = s => document.querySelector(s);
+const fmtN = (n, d=2) => (n==null||isNaN(n)) ? "—" : n.toLocaleString("zh-TW",{minimumFractionDigits:d,maximumFractionDigits:d});
+const fmtMoney = n => (n==null||isNaN(n)) ? "—" : "NT$ " + Math.round(n).toLocaleString("zh-TW");
+const todayStr = () => { const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
+const addDays = (s, n) => { const d=new Date(s+"T00:00:00"); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); };
+const clsOf = v => v>0.000001 ? "pos" : (v<-0.000001 ? "neg" : "flat");
+const signed = (v,d=2,suf="") => (v==null||isNaN(v)) ? "—" : (v>0?"+":"") + fmtN(v,d) + suf;
+const uid = p => p + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+const esc = s => String(s??"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+function lsGet(k, d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } }
+function lsSet(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){ toast("⚠ 儲存失敗（localStorage 可能已滿）"); } }
+
+let toastTimer=null;
+function toast(msg, ms=2600){ const t=$("#toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove("show"), ms); }
+
+/* ---------------- 狀態 ---------------- */
+let holdings = lsGet(LS_H, []);
+function normalizeHoldings(){
+  holdings.forEach(h=>{
+    h.purchases = h.purchases||[];
+    h.dividends = h.dividends||[];
+    h.rspPlans  = h.rspPlans||[];
+  });
+}
+normalizeHoldings();
+let settings = Object.assign({defaultChartRange:"3M", currency:"TWD", refreshOnOpen:true, theme:"light"}, lsGet(LS_S, {}));
+let fxCache  = lsGet(LS_FX, {});   // {USD:{rate,date}, ...} → TWD
+let navMem   = {};                 // 記憶體中的 nav cache
+let selectedId = null;
+let curRange = settings.defaultChartRange || "3M";
+let customRange = null;            // {start,end}
+let chartMode = "pct";             // pct | nav
+let sortKey = null, sortAsc = true;
+let chart = null;
+let picked = null;                 // 搜尋選中的基金
+let mngHoldingId = null, editPurId = null, editDivId = null;
+let chartView = "fund";            // fund | portfolio
+
+const RANGES = [["3D",3],["7D",7],["14D",14],["1M",30],["2M",60],["3M",90],["6M",180],["1Y",365],["2Y",730],["3Y",1095],["5Y",1825],["10Y",3650],["自訂",0]];
+
+/* ---------------- API ---------------- */
+async function fetchT(url, ms=20000){
+  const r = await fetch(url, {signal: AbortSignal.timeout(ms)});
+  if(!r.ok) throw new Error("HTTP "+r.status);
+  return r;
+}
+
+// 搜尋基金（Morningstar screener）
+async function msSearch(term){
+  const dp = "SecId|Name|LegalName|ClosePrice|ClosePriceDate|PriceCurrency|ISIN|CategoryName|CustomCategoryId";
+  const url = `${MS_BASE}/${MS_TOKEN}/security/screener?page=1&pageSize=25&sortOrder=${encodeURIComponent("Name asc")}&outputType=json&version=1&languageId=zh-TW&currencyId=TWD&universeIds=${encodeURIComponent(UNIVERSE)}&securityDataPoints=${encodeURIComponent(dp)}&term=${encodeURIComponent(term)}`;
+  const j = await (await fetchT(url)).json();
+  return (j.rows||[]).map(r=>({
+    secId:r.SecId, name:r.Name||r.LegalName, nav:r.ClosePrice, navDate:r.ClosePriceDate,
+    currency:r.PriceCurrency||"TWD", isin:r.ISIN||"", category:r.CategoryName||""
+  }));
+}
+
+// 淨值歷史（Morningstar timeseries, 計價幣別）
+async function msHistory(secId, startDate, endDate, currencyId){
+  const id = `${secId}]2]0]${UNIVERSE}`;
+  const url = `${MS_BASE}/timeseries_price/${MS_TOKEN}?id=${encodeURIComponent(id)}&currencyId=${encodeURIComponent(currencyId||"")}&idtype=Morningstar&frequency=daily&startDate=${startDate}&endDate=${endDate}&outputType=COMPACTJSON`;
+  const j = await (await fetchT(url, 25000)).json();
+  // [[ms,nav],...] → [{date,nav}]
+  return (Array.isArray(j)?j:[]).map(p=>({date:new Date(p[0]).toISOString().slice(0,10), nav:p[1]}));
+}
+
+// TDCC 備援（境外基金最新淨值, 以 ISIN 比對）
+let tdccCache = null;
+async function tdccOffshoreNav(isin){
+  if(!isin) return null;
+  try{
+    if(!tdccCache){
+      const j = await (await fetchT("https://openapi.tdcc.com.tw/v1/opendata/3-4", 30000)).json();
+      tdccCache = j;
+    }
+    const rows = tdccCache.filter(r=>r["ISINCODE"]===isin);
+    if(!rows.length) return null;
+    rows.sort((a,b)=>String(a["日期"]).localeCompare(String(b["日期"])));
+    const last = rows[rows.length-1];
+    const d = String(last["日期"]);
+    return {date:`${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`, nav:parseFloat(last["基金淨值(金額)"])};
+  }catch(e){ return null; }
+}
+
+// 匯率（以同一基金 原幣 vs TWD 序列推算）
+async function ensureFx(h){
+  const cur = h.currency;
+  if(cur==="TWD") return 1;
+  const c = fxCache[cur];
+  if(c && c.date===todayStr()) return c.rate;
+  try{
+    const end = todayStr(), start = addDays(end,-14);
+    const [base, twd] = await Promise.all([
+      msHistory(h.fundCode, start, end, cur),
+      msHistory(h.fundCode, start, end, "TWD")
+    ]);
+    if(base.length && twd.length){
+      const bMap = Object.fromEntries(base.map(x=>[x.date,x.nav]));
+      for(let i=twd.length-1;i>=0;i--){
+        const t=twd[i];
+        if(bMap[t.date] && bMap[t.date]>0){
+          const rate = t.nav / bMap[t.date];
+          fxCache[cur] = {rate, date:todayStr()};
+          lsSet(LS_FX, fxCache);
+          return rate;
+        }
+      }
+    }
+  }catch(e){}
+  return (c && c.rate) || 1; // 失敗時用舊匯率或 1
+}
+
+/* ---------------- NAV 快取 ---------------- */
+function navKey(id){ return NAV_PREFIX + id; }
+function getCache(h){
+  if(!navMem[h.fundCode]) navMem[h.fundCode] = lsGet(navKey(h.fundCode), {fundCode:h.fundCode, lastUpdated:null, navHistory:[]});
+  return navMem[h.fundCode];
+}
+function mergeHistory(h, list){
+  const c = getCache(h);
+  const map = new Map(c.navHistory.map(x=>[x.date,x.nav]));
+  list.forEach(x=>{ if(x.nav!=null && !isNaN(x.nav)) map.set(x.date, x.nav); });
+  c.navHistory = [...map.entries()].map(([date,nav])=>({date,nav})).sort((a,b)=>a.date.localeCompare(b.date));
+  if(c.navHistory.length>MAX_HIST) c.navHistory = c.navHistory.slice(-MAX_HIST);
+  c.lastUpdated = new Date().toISOString();
+  lsSet(navKey(h.fundCode), c);
+}
+
+/* ---------------- 定期定額排程 ---------------- */
+function schedDateFor(y, mIdx0, day){
+  const dim = new Date(y, mIdx0+1, 0).getDate();
+  return `${y}-${String(mIdx0+1).padStart(2,"0")}-${String(Math.min(day,dim)).padStart(2,"0")}`;
+}
+// 上一個排程日之後的下一個排程日；after=null 時回傳 startDate 當月（或次月）的第一個排程日
+function nextSched(plan, after){
+  if(!after){
+    const sd = new Date(plan.startDate+"T00:00:00");
+    let s = schedDateFor(sd.getFullYear(), sd.getMonth(), plan.dayOfMonth);
+    if(s < plan.startDate){
+      const n = new Date(sd.getFullYear(), sd.getMonth()+1, 1);
+      s = schedDateFor(n.getFullYear(), n.getMonth(), plan.dayOfMonth);
+    }
+    return s;
+  }
+  const d = new Date(after+"T00:00:00");
+  const n = new Date(d.getFullYear(), d.getMonth()+1, 1);
+  return schedDateFor(n.getFullYear(), n.getMonth(), plan.dayOfMonth);
+}
+// 依排程把到期未記錄的扣款自動補上（用扣款日或次一營業日的淨值）
+function applyRspPlans(){
+  let added = 0, skipped = 0;
+  holdings.forEach(h=>{
+    let changed = false;
+    (h.rspPlans||[]).forEach(pl=>{
+      if(pl.enabled===false || !(pl.amount>0)) return;
+      let guard = 0;
+      let cur = nextSched(pl, pl.lastApplied||null);
+      while(cur <= todayStr() && guard++ < 240){
+        const nv = navOnOrAfter(h, cur);
+        if(!nv){
+          // 太久以前仍查無淨值 → 略過該期；近 8 天內可能只是資料未出 → 等下次
+          if(cur <= addDays(todayStr(),-8)){ skipped++; pl.lastApplied = cur; cur = nextSched(pl, cur); continue; }
+          break;
+        }
+        h.purchases.push({purchaseId:uid("p"), type:"RSP", date:nv.date, units:+(pl.amount/nv.nav).toFixed(4),
+          navAtPurchase:nv.nav, amount:+pl.amount, fee:(+pl.fee||0), note:"自動扣款 "+cur.slice(0,7), planId:pl.planId});
+        pl.lastApplied = cur; added++; changed = true;
+        cur = nextSched(pl, cur);
+      }
+    });
+    if(changed) h.purchases.sort((a,b)=>b.date.localeCompare(a.date));
+  });
+  if(added || skipped){ lsSet(LS_H, holdings); renderAll(); }
+  if(added) toast(`🔁 已自動補 ${added} 筆定期定額記錄`+(skipped?`（${skipped} 期查無淨值已略過）`:""), 3600);
+  else if(skipped) toast(`⚠ ${skipped} 期定期定額查無淨值，已略過`);
+  return added;
+}
+
+/* ---------------- 更新流程 ---------------- */
+let updating = false;
+async function updateFund(h, full){
+  const c = getCache(h);
+  let start;
+  if(full || !c.navHistory.length){
+    start = addDays(todayStr(), -MAX_HIST);
+  }else{
+    start = addDays(c.navHistory[c.navHistory.length-1].date, -7);
+  }
+  let ok = false;
+  try{
+    const list = await msHistory(h.fundCode, start, todayStr(), h.currency);
+    if(list.length){ mergeHistory(h, list); ok = true; }
+  }catch(e){}
+  if(!ok){ // TDCC 備援（境外）
+    const t = await tdccOffshoreNav(h.isin);
+    if(t && t.nav){ mergeHistory(h, [t]); ok = true; }
+  }
+  if(h.currency!=="TWD") await ensureFx(h);
+  return ok;
+}
+
+async function updateAll(force){
+  if(updating || !holdings.length) return;
+  updating = true;
+  const st = $("#updStatus");
+  $("#btnRefresh").disabled = true;
+  let okCnt = 0, failCnt = 0;
+  for(let i=0;i<holdings.length;i++){
+    st.innerHTML = `<span class="spin"></span> 更新中 ${i+1}/${holdings.length}…`;
+    const ok = await updateFund(holdings[i], force);
+    ok ? okCnt++ : failCnt++;
+    renderAll(false);
+    if(holdings.length>10 && i<holdings.length-1) await new Promise(r=>setTimeout(r,500));
+  }
+  settings._lastRefresh = new Date().toISOString();
+  lsSet(LS_S, settings);
+  updating = false;
+  $("#btnRefresh").disabled = false;
+  st.textContent = "更新於 " + new Date().toLocaleTimeString("zh-TW",{hour12:false});
+  if(failCnt) toast(`⚠ ${failCnt} 支基金更新失敗，已使用快取資料`);
+  applyRspPlans();
+  renderAll(true);
+}
+
+/* ---------------- 計算 ---------------- */
+function totUnits(h){ return h.purchases.reduce((s,p)=>s+(+p.units||0),0); }
+// 單筆買入成本：有填金額用金額（更精確），否則 單位×淨值；皆加上手續費
+const purCost = p => ((p.amount!=null && !isNaN(+p.amount) && +p.amount>0) ? +p.amount : (+p.units||0)*(+p.navAtPurchase||0)) + (+p.fee||0);
+function totCost(h){ return h.purchases.reduce((s,p)=>s+purCost(p),0); }
+function totDiv(h){ return (h.dividends||[]).reduce((s,d)=>s+(+d.amount||0),0); }
+function avgNav(h){ const u=totUnits(h); const c=h.purchases.reduce((s,p)=>s+(+p.units||0)*(+p.navAtPurchase||0),0); return u>0 ? c/u : null; }
+
+// XIRR 金額加權年化報酬（二分法求 NPV=0；flows: [{date, amt}]，投入為負、收回為正）
+function xirr(flows){
+  if(!flows || flows.length<2) return null;
+  const fs = [...flows].sort((a,b)=>a.date.localeCompare(b.date));
+  const t0 = new Date(fs[0].date+"T00:00:00");
+  const yrs = fs.map(f=>(new Date(f.date+"T00:00:00")-t0)/31557600000); // 365.25 天
+  if(yrs[yrs.length-1] < 0.019) return null;            // 期間 < 7 天不算
+  if(!fs.some(f=>f.amt<0) || !fs.some(f=>f.amt>0)) return null;
+  const npv = r => fs.reduce((s,f,i)=>s+f.amt/Math.pow(1+r,yrs[i]),0);
+  let lo=-0.9999, hi=10, flo=npv(lo), fhi=npv(hi);
+  if(isNaN(flo)||isNaN(fhi)||flo*fhi>0) return null;
+  for(let i=0;i<100;i++){
+    const mid=(lo+hi)/2, fm=npv(mid);
+    if(Math.abs(fm)<1e-7) return mid;
+    if(flo*fm<0){ hi=mid; fhi=fm; } else { lo=mid; flo=fm; }
+  }
+  return (lo+hi)/2;
+}
+
+// 該日（或往後 maxDays 天內次一營業日）的淨值
+function navOnOrAfter(h, dateStr, maxDays=7){
+  const c = getCache(h), limit = addDays(dateStr, maxDays);
+  return c.navHistory.find(x=>x.date>=dateStr && x.date<=limit) || null;
+}
+function findNavInList(list, dateStr, maxDays=7){
+  const limit = addDays(dateStr, maxDays);
+  return (list||[]).find(x=>x.date>=dateStr && x.date<=limit) || null;
+}
+function latest(h){ const c=getCache(h); return c.navHistory.length ? c.navHistory[c.navHistory.length-1] : null; }
+function prev(h){ const c=getCache(h); return c.navHistory.length>1 ? c.navHistory[c.navHistory.length-2] : null; }
+function fxOf(h){ return h.currency==="TWD" ? 1 : ((fxCache[h.currency]&&fxCache[h.currency].rate)||1); }
+
+function rangeBounds(){
+  if(curRange==="自訂" && customRange) return [customRange.start, customRange.end];
+  const r = RANGES.find(x=>x[0]===curRange);
+  const days = r ? r[1] : 90;
+  return [addDays(todayStr(), -days), todayStr()];
+}
+function rangeReturn(h){
+  const c = getCache(h);
+  if(!c.navHistory.length) return null;
+  const [start, end] = rangeBounds();
+  const inR = c.navHistory.filter(x=>x.date>=start && x.date<=end);
+  if(inR.length<2) return null;
+  return (inR[inR.length-1].nav - inR[0].nav)/inR[0].nav*100;
+}
+
+function rowData(h){
+  const l = latest(h), p = prev(h);
+  const units = totUnits(h), cost = totCost(h), div = totDiv(h);
+  const value = (l&&units>0) ? units*l.nav : null;
+  const pl = (value!=null) ? value+div-cost : null;   // 含息損益
+  return {
+    h, name:h.fundName, nav:l?l.nav:null, navDate:l?l.date:null,
+    dayChg: (l&&p)? l.nav-p.nav : null, dayChgPct:(l&&p)? (l.nav-p.nav)/p.nav*100 : null,
+    units, cost, div, value, pl, plPct:(pl!=null&&cost>0)? pl/cost*100 : null,
+    rangePct: rangeReturn(h)
+  };
+}
+
+// 單一基金 XIRR（計價幣別；買入為負現金流、配息與目前現值為正）
+function fundXirr(h){
+  const flows = [];
+  h.purchases.forEach(p=>{ const c=purCost(p); if(c>0) flows.push({date:p.date, amt:-c}); });
+  (h.dividends||[]).forEach(d=>{ if(+d.amount>0) flows.push({date:d.date, amt:+d.amount}); });
+  const l = latest(h), u = totUnits(h);
+  if(l && u>0) flows.push({date:todayStr(), amt:u*l.nav});
+  return xirr(flows);
+}
+
+/* ---------------- 渲染：表格/摘要 ---------------- */
+function renderHeader(){
+  let cost=0, value=0, div=0, has=false;
+  const flows = [];
+  holdings.forEach(h=>{
+    const d = rowData(h), fx = fxOf(h);
+    if(d.cost) { cost += d.cost*fx; has=true; }
+    if(d.value!=null) value += d.value*fx;
+    div += d.div*fx;
+    h.purchases.forEach(p=>{ const c=purCost(p)*fx; if(c>0) flows.push({date:p.date, amt:-c}); });
+    (h.dividends||[]).forEach(dv=>{ if(+dv.amount>0) flows.push({date:dv.date, amt:+dv.amount*fx}); });
+  });
+  if(value>0) flows.push({date:todayStr(), amt:value});
+  const pl = value+div-cost, pct = cost>0 ? pl/cost*100 : null;
+  $("#sumCost").textContent = has?fmtMoney(cost):"—";
+  $("#sumValue").textContent = has?fmtMoney(value):"—";
+  $("#sumDiv").textContent = has?fmtMoney(div):"—";
+  const elPL=$("#sumPL"), elPct=$("#sumPct");
+  elPL.textContent = has?(pl>=0?"+":"")+fmtMoney(Math.abs(pl)).replace("NT$ ", pl>=0?"NT$ ":"-NT$ "):"—";
+  elPL.className = "val "+clsOf(pl);
+  elPct.textContent = (pct!=null)?signed(pct,2,"%"):"—";
+  elPct.className = "val "+clsOf(pct||0);
+  const r = has ? xirr(flows) : null;
+  const elX = $("#sumXirr");
+  elX.textContent = (r!=null) ? signed(r*100,2,"%") : "—";
+  elX.className = "val "+clsOf(r||0);
+  $("#sbCost").textContent = has?fmtMoney(cost):"—";
+  const sb=$("#sbPL");
+  sb.textContent = has?signed(pl,0):"—";
+  sb.className = clsOf(pl);
+}
+
+function renderTable(){
+  const tb = $("#tbody");
+  $("#emptyHint").hidden = holdings.length>0;
+  let rows = holdings.map(rowData);
+  if(sortKey){
+    rows.sort((a,b)=>{
+      let va=a[sortKey], vb=b[sortKey];
+      if(va==null) return 1; if(vb==null) return -1;
+      if(typeof va==="string") return sortAsc?va.localeCompare(vb):vb.localeCompare(va);
+      return sortAsc?va-vb:vb-va;
+    });
+  }
+  tb.innerHTML = rows.map(d=>{
+    const sel = d.h.id===selectedId?" class=\"sel\"":"";
+    const dayTxt = d.dayChg!=null ? `<span class="${clsOf(d.dayChg)}">${signed(d.dayChg, d.nav>=100?2:4)}<br><span class="subTxt ${clsOf(d.dayChg)}">${signed(d.dayChgPct,2,"%")}</span></span>` : "—";
+    return `<tr data-id="${d.h.id}"${sel}>
+      <td title="${esc(d.h.fundName)}">${esc(d.h.fundName)}<br><span class="subTxt">${esc(d.h.currency)}${d.h.isin?" · "+esc(d.h.isin):""}</span></td>
+      <td>${fmtN(d.nav, d.nav!=null&&d.nav>=100?2:4)}</td>
+      <td>${d.navDate? d.navDate.replaceAll("-","/") :"—"}</td>
+      <td>${dayTxt}</td>
+      <td class="unitsCell" title="點擊管理買入記錄">${fmtN(d.units,2)}</td>
+      <td>${fmtN(d.cost,0)}</td>
+      <td>${fmtN(d.value,0)}</td>
+      <td class="${clsOf(d.pl??0)}">${d.pl!=null?signed(d.pl,0):"—"}</td>
+      <td>${d.div>0?fmtN(d.div,0):"—"}</td>
+      <td class="${clsOf(d.plPct??0)}">${d.plPct!=null?signed(d.plPct,2,"%"):"—"}</td>
+      <td class="${clsOf(d.rangePct??0)}">${d.rangePct!=null?signed(d.rangePct,2,"%"):"—"}</td>
+      <td><span class="rowBtns">
+        <button data-act="buy" data-id="${d.h.id}" title="新增買入">＋買入</button>
+        <button data-act="mng" data-id="${d.h.id}" title="管理買入記錄">管理</button>
+        <button data-act="del" data-id="${d.h.id}" title="刪除基金">🗑</button>
+      </span></td>
+    </tr>`;
+  }).join("");
+  // sort arrows
+  document.querySelectorAll("thead th").forEach(th=>{
+    const a = th.querySelector(".arr"); if(!a) return;
+    a.textContent = th.dataset.k===sortKey ? (sortAsc?"▲":"▼") : "";
+  });
+}
+
+/* ---------------- 渲染：圖表 ---------------- */
+function renderTabs(){
+  let span = 0;
+  if(chartView==="portfolio"){
+    let first = null;
+    holdings.forEach(h=>{ const c=getCache(h); if(c.navHistory.length && (!first || c.navHistory[0].date<first)) first=c.navHistory[0].date; });
+    span = first ? (new Date(todayStr()) - new Date(first))/86400000 : 0;
+  }else{
+    const sel = holdings.find(h=>h.id===selectedId);
+    const c = sel ? getCache(sel) : null;
+    span = (c&&c.navHistory.length) ? (new Date(todayStr()) - new Date(c.navHistory[0].date))/86400000 : 0;
+  }
+  $("#rangeTabs").innerHTML = RANGES.map(([k,days])=>{
+    const dis = k!=="自訂" && span>0 && days>span+40;
+    return `<button class="tab${k===curRange?" on":""}" data-r="${k}" ${dis?"disabled":""}>${k}</button>`;
+  }).join("");
+}
+
+const markerPlugin = {
+  id:"markers",
+  afterDatasetsDraw(ch, args, opts){
+    const {ctx, chartArea:{top,bottom,left,right}, scales:{x,y}} = ch;
+    const meta = opts.meta; if(!meta) return;
+    ctx.save();
+    // 持倉均價水平線
+    if(meta.costLine!=null && meta.costLine>=y.min && meta.costLine<=y.max){
+      const yy = y.getPixelForValue(meta.costLine);
+      ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue("--muted").trim();
+      ctx.setLineDash([6,4]); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(left,yy); ctx.lineTo(right,yy); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = ctx.strokeStyle; ctx.font = "10px sans-serif"; ctx.textAlign="left";
+      ctx.fillText(meta.costLabel, left+4, yy-4);
+    }
+    // 買入標記
+    (meta.buys||[]).forEach(b=>{
+      const idx = meta.labels.indexOf(b.date);
+      if(idx<0) return;
+      const xx = x.getPixelForValue(idx);
+      const col = b.type==="RSP" ? getComputedStyle(document.body).getPropertyValue("--rsp").trim()
+                                 : getComputedStyle(document.body).getPropertyValue("--lump").trim();
+      ctx.strokeStyle = col; ctx.setLineDash([3,3]); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(xx,top); ctx.lineTo(xx,bottom); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = col;
+      ctx.beginPath(); ctx.moveTo(xx,bottom-1); ctx.lineTo(xx-5,bottom+7); ctx.lineTo(xx+5,bottom+7); ctx.closePath(); ctx.fill();
+    });
+    ctx.restore();
+  }
+};
+if(window.Chart) Chart.register(markerPlugin);
+
+// 投資組合每日序列：現值 / 累計投入 / 累計配息（TWD，外幣以目前匯率近似）
+function buildPortfolioSeries(start, end){
+  const dateSet = new Set();
+  holdings.forEach(h=>{
+    getCache(h).navHistory.forEach(x=>{ if(x.date>=start && x.date<=end) dateSet.add(x.date); });
+  });
+  const labels = [...dateSet].sort();
+  if(labels.length<2) return null;
+  const valArr = labels.map(()=>0), costArr = labels.map(()=>0), divArr = labels.map(()=>0);
+  holdings.forEach(h=>{
+    const fx = fxOf(h), hist = getCache(h).navHistory;
+    const purAsc = [...h.purchases].sort((a,b)=>a.date.localeCompare(b.date));
+    const divAsc = [...(h.dividends||[])].sort((a,b)=>a.date.localeCompare(b.date));
+    let hi=0, pi=0, di=0, curNav=null, units=0, cum=0, cumDiv=0;
+    labels.forEach((d,i)=>{
+      while(hi<hist.length && hist[hi].date<=d){ curNav=hist[hi].nav; hi++; }
+      while(pi<purAsc.length && purAsc[pi].date<=d){ units+=+purAsc[pi].units||0; cum+=purCost(purAsc[pi]); pi++; }
+      while(di<divAsc.length && divAsc[di].date<=d){ cumDiv+=+divAsc[di].amount||0; di++; }
+      if(curNav!=null && units>0) valArr[i] += units*curNav*fx;
+      costArr[i] += cum*fx;
+      divArr[i]  += cumDiv*fx;
+    });
+  });
+  return {labels, valArr, costArr, divArr};
+}
+
+function renderPortfolioChart(){
+  const hint = $("#chartHint");
+  $("#chartTitle").textContent = "📊 投資組合（TWD）";
+  const [start,end] = rangeBounds();
+  const s = holdings.length ? buildPortfolioSeries(start,end) : null;
+  if(!s){ hint.textContent = holdings.length ? "此區間無足夠資料（可點「⟳ 更新」抓取更多歷史）" : "尚未加入任何基金"; hint.style.display="flex"; if(chart){chart.destroy();chart=null;} return; }
+  hint.style.display="none";
+  const usePct = chartMode==="pct";
+  const gridCol = getComputedStyle(document.body).getPropertyValue("--border").trim();
+  const txtCol  = getComputedStyle(document.body).getPropertyValue("--muted").trim();
+  const accCol  = getComputedStyle(document.body).getPropertyValue("--accent").trim();
+  // 全部基金的買入標記
+  const buys = [];
+  holdings.forEach(h=>h.purchases.forEach(p=>{ if(p.date>=start&&p.date<=end) buys.push({date:p.date, type:p.type}); }));
+  const meta = {labels:s.labels, buys, costLine: usePct?100:null, costLabel: usePct?"成本 100%":""};
+  let datasets;
+  if(usePct){
+    // 含息報酬指數：(現值＋累計配息)/累計投入 ×100
+    const vals = s.labels.map((_,i)=> s.costArr[i]>0 ? (s.valArr[i]+s.divArr[i])/s.costArr[i]*100 : null);
+    datasets = [{data:vals, borderColor:accCol, borderWidth:1.8, tension:0, pointRadius:vals.map((v,i)=>i===vals.length-1&&v!=null?3.5:0), pointBackgroundColor:accCol, fill:false, spanGaps:true}];
+  }else{
+    datasets = [
+      {label:"現值", data:s.valArr.map(v=>v||null), borderColor:accCol, borderWidth:1.8, tension:0, pointRadius:0, fill:false, spanGaps:true},
+      {label:"投入成本", data:s.costArr, borderColor:txtCol, borderWidth:1.2, borderDash:[6,4], stepped:true, pointRadius:0, fill:false}
+    ];
+  }
+  const cfg = {
+    type:"line",
+    data:{labels:s.labels, datasets},
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:false,
+      layout:{padding:{bottom:10}},
+      interaction:{mode:"index", intersect:false},
+      plugins:{
+        legend:{display:!usePct, labels:{color:txtCol, boxWidth:18, font:{size:11}}},
+        markers:{meta},
+        tooltip:{callbacks:{
+          title: items=>items[0].label,
+          label: item=>{
+            const i = item.dataIndex;
+            const v = s.valArr[i], c = s.costArr[i], dv = s.divArr[i];
+            return [
+              "現值 "+fmtMoney(v),
+              "投入 "+fmtMoney(c),
+              "配息累計 "+fmtMoney(dv),
+              "含息損益 "+signed(v+dv-c,0)+(c>0?"（"+signed((v+dv-c)/c*100,2,"%")+"）":"")
+            ];
+          }
+        }}
+      },
+      scales:{
+        x:{ticks:{color:txtCol, maxTicksLimit:10, maxRotation:45, font:{size:10}}, grid:{color:gridCol}},
+        y:{position:"right", ticks:{color:txtCol, font:{size:10},
+            callback:v=> usePct ? v.toFixed(1)+"%" : "NT$"+(Math.abs(v)>=10000? (v/10000).toFixed(1)+"萬" : Math.round(v))},
+           grid:{color:gridCol}}
+      }
+    }
+  };
+  if(chart){ chart.destroy(); }
+  chart = new Chart($("#chartCanvas"), cfg);
+}
+
+function renderChart(){
+  const hint = $("#chartHint");
+  $("#btnPortfolio").classList.toggle("on", chartView==="portfolio");
+  if(chartView==="portfolio") return renderPortfolioChart();
+  const h = holdings.find(x=>x.id===selectedId);
+  if(!h){
+    if(holdings.length){ chartView="portfolio"; $("#btnPortfolio").classList.add("on"); return renderPortfolioChart(); }
+    hint.textContent="選擇基金以顯示走勢圖"; hint.style.display="flex"; if(chart){chart.destroy();chart=null;} $("#chartTitle").textContent="—"; return; }
+  $("#chartTitle").textContent = h.fundName + "（"+h.currency+"）";
+  const c = getCache(h);
+  const [start,end] = rangeBounds();
+  const data = c.navHistory.filter(x=>x.date>=start && x.date<=end);
+  if(data.length<2){ hint.textContent = c.navHistory.length ? "此區間無足夠資料（可點「更新」抓取更多歷史）" : "尚無淨值資料，請點「⟳ 更新」"; hint.style.display="flex"; if(chart){chart.destroy();chart=null;} return; }
+  hint.style.display="none";
+
+  const base = avgNav(h);
+  const usePct = chartMode==="pct";
+  const baseline = usePct ? (base || data[0].nav) : null;
+  const labels = data.map(x=>x.date);
+  const vals = data.map(x=> usePct ? x.nav/baseline*100 : x.nav);
+  const lastIdx = vals.length-1;
+  const lineCol = getComputedStyle(document.body).getPropertyValue("--down").trim(); // 紅色走勢線(如截圖)
+  const buys = h.purchases.map(p=>({date:p.date, type:p.type})).filter(b=>b.date>=start&&b.date<=end);
+
+  const meta = {
+    labels,
+    buys,
+    costLine: usePct ? (base?100:null) : base,
+    costLabel: usePct ? "持倉均價 100%" : (base? "持倉均價 "+fmtN(base, base>=100?2:4) : "")
+  };
+  const gridCol = getComputedStyle(document.body).getPropertyValue("--border").trim();
+  const txtCol = getComputedStyle(document.body).getPropertyValue("--muted").trim();
+
+  const cfg = {
+    type:"line",
+    data:{labels, datasets:[{
+      data:vals, borderColor:lineCol, borderWidth:1.6, tension:0,
+      pointRadius:vals.map((_,i)=>i===lastIdx?3.5:0),
+      pointBackgroundColor:lineCol, fill:false, spanGaps:true
+    }]},
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:false,
+      layout:{padding:{bottom:10}},
+      interaction:{mode:"index", intersect:false},
+      plugins:{
+        legend:{display:false},
+        markers:{meta},
+        tooltip:{
+          callbacks:{
+            title: items=>items[0].label,
+            label: item=>{
+              const i=item.dataIndex, nav=data[i].nav;
+              const lines = ["淨值 "+fmtN(nav, nav>=100?2:4)+" "+h.currency];
+              if(baseline) lines.push("相對均價 "+signed(nav/ (base||baseline) *100-100,2,"%"));
+              if(base) lines.push("均價差 "+signed(nav-base, base>=100?2:4));
+              return lines;
+            }
+          }
+        }
+      },
+      scales:{
+        x:{ticks:{color:txtCol, maxTicksLimit:10, maxRotation:45, font:{size:10}}, grid:{color:gridCol}},
+        y:{position:"right", ticks:{color:txtCol, font:{size:10},
+            callback:v=> usePct ? v.toFixed(1)+"%" : fmtN(v, v>=100?0:2)},
+           grid:{color:gridCol}}
+      }
+    }
+  };
+  if(chart){ chart.destroy(); }
+  chart = new Chart($("#chartCanvas"), cfg);
+}
+
+function renderAll(withChart=true){
+  renderHeader();
+  renderTable();
+  renderTabs();
+  const h = holdings.find(x=>x.id===selectedId);
+  $("#sbSel").textContent = h? "已選：" + h.fundName : "";
+  if(withChart) renderChart();
+}
+
+/* ---------------- 新增基金 ---------------- */
+let searchTimer=null;
+function openAdd(){
+  picked=null;
+  $("#addStep1").hidden=false; $("#addStep2").hidden=true;
+  $("#btnConfirmAdd").hidden=true; $("#btnBackSearch").hidden=true;
+  $("#searchInput").value=""; $("#searchResults").hidden=true; $("#searchStatus").textContent="";
+  $("#dlgAddTitle").textContent="新增基金";
+  $("#dlgAdd").showModal();
+  setTimeout(()=>$("#searchInput").focus(),60);
+}
+async function doSearch(){
+  const term = $("#searchInput").value.trim();
+  const box=$("#searchResults"), st=$("#searchStatus");
+  if(term.length<2){ box.hidden=true; st.textContent=""; return; }
+  st.innerHTML='<span class="spin"></span> 搜尋中…';
+  try{
+    const rows = await msSearch(term);
+    st.textContent = rows.length ? `找到 ${rows.length} 筆` : "查無結果，請換關鍵字";
+    box.hidden = !rows.length;
+    box.innerHTML = rows.map((r,i)=>`<div class="sr-item" data-i="${i}">
+      <div><div class="nm">${esc(r.name)}</div><div class="meta">${esc(r.category)}${r.isin?" · "+esc(r.isin):""}</div></div>
+      <div class="px">${fmtN(r.nav, r.nav!=null&&r.nav>=100?2:4)} ${esc(r.currency)}<br><span class="meta">${esc(r.navDate||"")}</span></div>
+    </div>`).join("");
+    box._rows = rows;
+  }catch(e){ st.textContent="搜尋失敗："+e.message+"（請檢查網路）"; }
+}
+function pickFund(r){
+  picked = r;
+  $("#addStep1").hidden=true; $("#addStep2").hidden=false;
+  $("#btnConfirmAdd").hidden=false; $("#btnBackSearch").hidden=false;
+  $("#dlgAddTitle").textContent="新增買入記錄";
+  $("#pickedFund").textContent = r.name + "（"+r.currency+"）　最新淨值 " + fmtN(r.nav, r.nav>=100?2:4) + "（"+(r.navDate||"")+"）";
+  $("#pDate").value = todayStr();
+  $("#pUnits").value=""; $("#pAmt").value=""; $("#pFee").value=""; $("#pNav").value = r.nav ?? ""; $("#pNote").value="";
+}
+
+// 金額 ÷ 淨值 → 自動算單位數（取 4 位小數）
+function syncUnits(amtEl, navEl, unitsEl){
+  const a = parseFloat(amtEl.value), n = parseFloat(navEl.value);
+  if(a>0 && n>0) unitsEl.value = +(a/n).toFixed(4);
+}
+async function navLookup(secId, currency, dateStr, inputEl, btn){
+  if(!dateStr){ toast("請先選擇買入日期"); return; }
+  btn.disabled=true; const old=btn.textContent; btn.textContent="…";
+  try{
+    const list = await msHistory(secId, addDays(dateStr,-10), dateStr, currency);
+    if(list.length){ inputEl.value = list[list.length-1].nav; toast("已帶入 "+list[list.length-1].date+" 淨值"); }
+    else toast("查無該日期附近的淨值，請手動輸入");
+  }catch(e){ toast("查詢失敗："+e.message); }
+  btn.disabled=false; btn.textContent=old;
+}
+async function confirmAdd(){
+  if(!picked) return;
+  const nav = parseFloat($("#pNav").value);
+  const amt = parseFloat($("#pAmt").value), fee = parseFloat($("#pFee").value)||0;
+  if(!(nav>0)){ toast("請輸入買入淨值"); return; }
+  if(amt>0 && !$("#pUnits").value) syncUnits($("#pAmt"), $("#pNav"), $("#pUnits"));
+  const units = parseFloat($("#pUnits").value);
+  if(!(units>0)){ toast("請輸入買入金額或單位數"); return; }
+  let h = holdings.find(x=>x.fundCode===picked.secId);
+  if(!h){
+    h = {id:uid("holding"), fundCode:picked.secId, fundName:picked.name, currency:picked.currency, isin:picked.isin, purchases:[], dividends:[], rspPlans:[]};
+    holdings.push(h);
+  }
+  h.purchases.push({purchaseId:uid("p"), type:document.querySelector("input[name=pType]:checked").value,
+    date:$("#pDate").value||todayStr(), units, navAtPurchase:nav,
+    amount:(amt>0?amt:null), fee:(fee>0?fee:0), note:$("#pNote").value.trim()});
+  h.purchases.sort((a,b)=>b.date.localeCompare(a.date));
+  lsSet(LS_H, holdings);
+  selectedId = h.id;
+  $("#dlgAdd").close();
+  renderAll();
+  toast("已新增 "+h.fundName);
+  updateFund(h).then(()=>renderAll());
+}
+
+/* ---------------- 買入記錄管理 ---------------- */
+function openMng(id){
+  mngHoldingId = id; editPurId = null; editDivId = null;
+  const h = holdings.find(x=>x.id===id); if(!h) return;
+  $("#mngTitle").textContent = h.fundName;
+  $("#purEdit").hidden = true;
+  $("#divEdit").hidden = true;
+  renderPurTable(); renderDivTable(); renderRspList();
+  $("#rspStart").value = todayStr();
+  $("#dlgMng").showModal();
+}
+function renderPurTable(){
+  const h = holdings.find(x=>x.id===mngHoldingId); if(!h) return;
+  const u = totUnits(h), avg = avgNav(h), cost = totCost(h);
+  $("#purBody").innerHTML = h.purchases.map(p=>{
+    const amtTxt = (p.amount!=null&&p.amount>0) ? fmtN(+p.amount,0) : fmtN((+p.units||0)*(+p.navAtPurchase||0),0);
+    const feeTxt = (+p.fee>0) ? `<br><span class="subTxt">費 ${fmtN(+p.fee,0)}</span>` : "";
+    return `<tr>
+    <td><span class="badge ${p.type}">${p.type==="RSP"?"定期":"單筆"}</span></td>
+    <td>${esc(p.date)}</td><td>${amtTxt}${feeTxt}</td><td>${fmtN(+p.units,4)}</td><td>${fmtN(+p.navAtPurchase, p.navAtPurchase>=100?2:4)}</td>
+    <td style="max-width:110px;overflow:hidden;text-overflow:ellipsis" title="${esc(p.note)}">${esc(p.note||"")}</td>
+    <td class="act"><button data-pedit="${p.purchaseId}" title="編輯">✏️</button><button data-pdel="${p.purchaseId}" title="刪除">🗑️</button></td>
+  </tr>`;}).join("") + `<tr class="totRow"><td>合計</td><td></td><td>${fmtN(cost,0)}</td><td>${fmtN(u,4)}</td><td>${avg?("均價 "+fmtN(avg, avg>=100?2:4)):"—"}</td><td></td><td></td></tr>`;
+  const r = fundXirr(h);
+  $("#mngXirr").textContent = "年化報酬(XIRR)：" + (r!=null ? signed(r*100,2,"%") : "—") + "　含息損益：" + signed((rowData(h).pl??0),0) + "（" + h.currency + "）";
+}
+function renderDivTable(){
+  const h = holdings.find(x=>x.id===mngHoldingId); if(!h) return;
+  const divs = h.dividends||[];
+  $("#divSum").textContent = divs.length ? `累計 ${fmtN(totDiv(h),0)} ${h.currency}` : "";
+  $("#divBody").innerHTML = divs.length ? divs.map(d=>`<tr>
+    <td>${esc(d.date)}</td><td>${fmtN(+d.amount,2)}</td>
+    <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${esc(d.note)}">${esc(d.note||"")}</td>
+    <td class="act"><button data-dedit="${d.divId}" title="編輯">✏️</button><button data-ddel="${d.divId}" title="刪除">🗑️</button></td>
+  </tr>`).join("") : `<tr><td colspan="4" class="subTxt" style="text-align:center">尚無配息記錄</td></tr>`;
+}
+function renderRspList(){
+  const h = holdings.find(x=>x.id===mngHoldingId); if(!h) return;
+  const plans = h.rspPlans||[];
+  $("#rspList").innerHTML = plans.length ? plans.map(pl=>`<div class="planRow${pl.enabled===false?" off":""}">
+    <span>每月 <b>${pl.dayOfMonth}</b> 日 · ${fmtN(+pl.amount,0)} ${esc(h.currency)}${pl.fee>0?`（費 ${fmtN(+pl.fee,0)}）`:""} · 自 ${esc(pl.startDate)}${pl.lastApplied?` · 已扣至 ${esc(pl.lastApplied)}`:""}</span>
+    <span class="rowBtns">
+      <button data-ptoggle="${pl.planId}">${pl.enabled===false?"啟用":"停用"}</button>
+      <button data-pldel="${pl.planId}">🗑</button>
+    </span>
+  </div>`).join("") : `<div class="subTxt" style="margin-bottom:8px">尚無排程</div>`;
+}
+function openPurEdit(pid){
+  editPurId = pid;
+  const h = holdings.find(x=>x.id===mngHoldingId);
+  const p = pid ? h.purchases.find(x=>x.purchaseId===pid) : null;
+  $("#purEditTitle").textContent = p ? "編輯記錄" : "新增記錄";
+  document.querySelector(`input[name=eType][value=${p?p.type:"RSP"}]`).checked = true;
+  $("#eDate").value = p?p.date:todayStr();
+  $("#eUnits").value = p?p.units:"";
+  $("#eAmt").value = (p&&p.amount!=null)?p.amount:"";
+  $("#eFee").value = (p&&p.fee)?p.fee:"";
+  $("#eNav").value = p?p.navAtPurchase:"";
+  $("#eNote").value = p?(p.note||""):"";
+  $("#purEdit").hidden = false;
+  $("#eAmt").focus();
+}
+function savePur(){
+  const h = holdings.find(x=>x.id===mngHoldingId); if(!h) return;
+  const nav = parseFloat($("#eNav").value);
+  const amt = parseFloat($("#eAmt").value), fee = parseFloat($("#eFee").value)||0;
+  if(amt>0 && nav>0 && !$("#eUnits").value) syncUnits($("#eAmt"), $("#eNav"), $("#eUnits"));
+  const units = parseFloat($("#eUnits").value);
+  if(!(units>0)||!(nav>0)){ toast("淨值與（金額或單位數）需大於 0"); return; }
+  const obj = {type:document.querySelector("input[name=eType]:checked").value, date:$("#eDate").value||todayStr(), units, navAtPurchase:nav,
+    amount:(amt>0?amt:null), fee:(fee>0?fee:0), note:$("#eNote").value.trim()};
+  if(editPurId){
+    const p = h.purchases.find(x=>x.purchaseId===editPurId); Object.assign(p,obj);
+  }else{
+    h.purchases.push(Object.assign({purchaseId:uid("p")},obj));
+  }
+  h.purchases.sort((a,b)=>b.date.localeCompare(a.date));
+  lsSet(LS_H,holdings);
+  $("#purEdit").hidden=true; editPurId=null;
+  renderPurTable(); renderAll();
+}
+
+/* ---------------- 匯出 / 匯入 ---------------- */
+function doExport(){
+  const data = {exportedAt:new Date().toISOString(), holdings, settings, fx:fxCache, navCaches:{}};
+  holdings.forEach(h=>{ data.navCaches[h.fundCode]=getCache(h); });
+  const blob = new Blob([JSON.stringify(data,null,1)],{type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "fund_tracker_backup_"+todayStr()+".json";
+  a.click(); URL.revokeObjectURL(a.href);
+  toast("已匯出備份檔");
+}
+function doImport(file){
+  const rd = new FileReader();
+  rd.onload = ()=>{
+    try{
+      const d = JSON.parse(rd.result);
+      if(!Array.isArray(d.holdings)) throw new Error("格式不符");
+      holdings = d.holdings; lsSet(LS_H,holdings);
+      if(d.settings){ settings=Object.assign(settings,d.settings); lsSet(LS_S,settings); }
+      if(d.fx){ fxCache=d.fx; lsSet(LS_FX,fxCache); }
+      navMem={};
+      if(d.navCaches){ Object.entries(d.navCaches).forEach(([k,v])=>lsSet(NAV_PREFIX+k,v)); }
+      selectedId = holdings.length?holdings[0].id:null;
+      normalizeHoldings();
+      renderAll(); toast("匯入成功："+holdings.length+" 支基金");
+    }catch(e){ toast("匯入失敗："+e.message); }
+  };
+  rd.readAsText(file);
+}
+
+/* ---------------- CSV 批次匯入 ---------------- */
+function parseCsv(text){
+  text = text.replace(/^﻿/, "");
+  const rows=[]; let row=[], cur="", inQ=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(inQ){
+      if(ch==='"'){ if(text[i+1]==='"'){ cur+='"'; i++; } else inQ=false; }
+      else cur+=ch;
+    }
+    else if(ch==='"') inQ=true;
+    else if(ch===","){ row.push(cur); cur=""; }
+    else if(ch==="\n"){ row.push(cur); cur=""; if(row.some(c=>c.trim()!=="")) rows.push(row); row=[]; }
+    else if(ch==="\r"){ /* skip */ }
+    else cur+=ch;
+  }
+  row.push(cur);
+  if(row.some(c=>c.trim()!=="")) rows.push(row);
+  return rows;
+}
+const csvNum = s => { const v=parseFloat(String(s??"").replace(/[, ]/g,"")); return isNaN(v)?null:v; };
+const isIsin = s => /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/i.test(String(s).trim());
+function csvNormType(s){
+  s = String(s??"").trim().toUpperCase();
+  if(/^(定期定額|定期|RSP)$/.test(s)) return "RSP";
+  if(/^(單筆|單筆買入|LUMP)$/.test(s)) return "LUMP";
+  if(/^(配息|股息|DIV|DIVIDEND)$/.test(s)) return "DIV";
+  return null;
+}
+function csvNormDate(s){
+  s = String(s??"").trim().replace(/[\/\.]/g,"-");
+  const m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if(!m) return null;
+  if(+m[2]<1||+m[2]>12||+m[3]<1||+m[3]>31) return null;
+  return `${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`;
+}
+
+let csvState = null; // {entries:[], groups:Map}
+function openCsv(){
+  csvState = null;
+  $("#csvStatus").textContent = "";
+  $("#csvPrev").innerHTML = "";
+  $("#btnCsvOk").disabled = true;
+  $("#dlgCsv").showModal();
+}
+function downloadCsvTemplate(){
+  const tpl = "﻿基金,類型,日期,金額,單位數,淨值,手續費,備註\r\n"
+    + "統一奔騰基金,定期定額,2026-01-06,3000,,,30,範例-請替換\r\n"
+    + "TW000T0910Y7,單筆,2026-03-16,50000,,,,基金欄可填名稱或ISIN\r\n"
+    + "統一奔騰基金,配息,2026-04-10,120,,,,配息範例\r\n";
+  const blob = new Blob([tpl],{type:"text/csv;charset=utf-8"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "fund_import_template.csv";
+  a.click(); URL.revokeObjectURL(a.href);
+}
+function readCsvFile(file){
+  return file.text().then(t=>{
+    if(!t.includes("�")) return t;
+    // UTF-8 解碼出現亂碼 → 改用 Big5
+    return new Promise((res,rej)=>{
+      const rd = new FileReader();
+      rd.onload = ()=>res(rd.result);
+      rd.onerror = rej;
+      rd.readAsText(file, "big5");
+    });
+  });
+}
+
+async function processCsvText(text){
+  const st = $("#csvStatus");
+  st.innerHTML = '<span class="spin"></span> 解析中…';
+  $("#btnCsvOk").disabled = true;
+  const rows = parseCsv(text);
+  if(rows.length<2){ st.textContent = "❌ 檔案無資料列（需含標題列＋至少一筆記錄）"; return; }
+  // 標題對應
+  const H = rows[0].map(c=>c.trim());
+  // 基富通「投資總覽匯出報表」格式自動辨識
+  if(H.includes("基金代碼") && H.includes("庫存單位數") && H.includes("平均申購淨值"))
+    return processFundrichCsv(rows, H);
+  const findCol = names => H.findIndex(h=>names.includes(h));
+  const col = {
+    fund: findCol(["基金","基金名稱","名稱","ISIN","基金代碼","代碼"]),
+    type: findCol(["類型","交易類型"]),
+    date: findCol(["日期","買入日期","交易日期"]),
+    amount: findCol(["金額","買入金額","投資金額"]),
+    units: findCol(["單位數","單位","買入單位數"]),
+    nav: findCol(["淨值","買入淨值"]),
+    fee: findCol(["手續費","費用"]),
+    note: findCol(["備註","說明"])
+  };
+  if(col.fund<0||col.type<0||col.date<0){ st.textContent = "❌ 標題列缺少必要欄位（基金 / 類型 / 日期）"; return; }
+  if(col.amount<0&&col.units<0){ st.textContent = "❌ 需至少有「金額」或「單位數」欄位"; return; }
+  // 建立資料列
+  const entries = rows.slice(1).map((r,i)=>{
+    const get = c => c>=0 ? (r[c]??"").trim() : "";
+    const e = {
+      line: i+2, key: get(col.fund),
+      type: csvNormType(get(col.type)),
+      date: csvNormDate(get(col.date)),
+      amount: csvNum(get(col.amount)), units: csvNum(get(col.units)),
+      nav: csvNum(get(col.nav)), fee: csvNum(get(col.fee))||0,
+      note: get(col.note), status: "ok", err: "", navDate: null
+    };
+    if(!e.key) { e.status="err"; e.err="基金欄空白"; }
+    else if(!e.type) { e.status="err"; e.err="類型須為 定期定額/單筆/配息"; }
+    else if(!e.date) { e.status="err"; e.err="日期格式錯誤（YYYY-MM-DD）"; }
+    else if(e.date>todayStr()) { e.status="err"; e.err="日期在未來"; }
+    else if(e.type==="DIV" && !(e.amount>0)) { e.status="err"; e.err="配息需填金額"; }
+    else if(e.type!=="DIV" && !(e.amount>0) && !(e.units>0)) { e.status="err"; e.err="需填金額或單位數"; }
+    return e;
+  });
+  // 基金比對
+  const groups = new Map();
+  entries.forEach(e=>{ if(e.status!=="err" && !groups.has(e.key)) groups.set(e.key, {key:e.key, holding:null, candidates:[], chosen:0, hist:null, error:null}); });
+  csvState = {entries, groups};
+  let gi = 0;
+  for(const g of groups.values()){
+    gi++;
+    st.innerHTML = `<span class="spin"></span> 比對基金 ${gi}/${groups.size}：${esc(g.key)}…`;
+    const ex = holdings.find(h=>h.isin===g.key || h.fundCode===g.key || h.fundName===g.key);
+    if(ex){ g.holding = ex; g.candidates = [{secId:ex.fundCode, name:ex.fundName, currency:ex.currency, isin:ex.isin||""}]; continue; }
+    try{
+      const found = await msSearch(g.key);
+      if(!found.length){ g.error = "查無此基金"; continue; }
+      if(isIsin(g.key)){
+        const hit = found.find(r=>r.isin && r.isin.toUpperCase()===g.key.toUpperCase());
+        if(hit){ g.candidates=[hit]; continue; }
+        g.error = "查無此 ISIN"; continue;
+      }
+      const exact = found.findIndex(r=>r.name===g.key);
+      g.candidates = found;
+      g.chosen = exact>=0 ? exact : 0;
+    }catch(err){ g.error = "搜尋失敗："+err.message; }
+  }
+  await fillCsvNavs();
+  dedupeCsv();
+  renderCsvPreview();
+}
+
+/* ---- 基富通投資總覽報表匯入 ---- */
+function frCleanName(s){ return String(s??"").replace(/【[^】]*】/g,"").trim(); }
+// 從候選清單挑最像的預設值（幣別、TISA/累積字樣、名稱包含關係）
+function frPickDefault(cands, rawName, wantCur){
+  let best=0, bestScore=-1;
+  cands.forEach((c,i)=>{
+    let s=0;
+    if(wantCur && c.currency===wantCur) s+=3;
+    if(/TISA/i.test(rawName)===/TISA/i.test(c.name)) s+=2;
+    if(rawName.includes("累積")===c.name.includes("累積")) s+=1;
+    if(rawName.includes(c.name)) s+=4;
+    if(c.name && rawName.startsWith(c.name.slice(0,5))) s+=1;
+    if(s>bestScore){ bestScore=s; best=i; }
+  });
+  return best;
+}
+async function processFundrichCsv(rows, H){
+  const st = $("#csvStatus");
+  const idx = name => H.indexOf(name);
+  const col = {code:idx("基金代碼"), name:idx("基金名稱"), principal:idx("投資本金"), units:idx("庫存單位數"),
+               cur:idx("計價幣別"), nav:idx("平均申購淨值"), navDate:idx("淨值日期"), div:idx("累積配息金額")};
+  if(col.name<0||col.units<0){ st.textContent="❌ 基富通報表欄位不完整"; return; }
+  const entries = [];
+  rows.slice(1).forEach((r,i)=>{
+    const get = c => c>=0 ? (r[c]??"").trim() : "";
+    const rawName = get(col.name); if(!rawName) return;
+    const units = csvNum(get(col.units)), nav = csvNum(get(col.nav)), principal = csvNum(get(col.principal));
+    const curM = get(col.cur).match(/[A-Z]{3}/);
+    const navDate = csvNormDate(get(col.navDate)) || todayStr();
+    const divAmt = csvNum(get(col.div))||0;
+    const code = get(col.code).replace(/'/g,"");
+    const e = {line:i+2, key:frCleanName(rawName), rawName, type:"LUMP", date:navDate,
+      amount:(principal>0?principal:null), units, nav, fee:0, note:"基富通庫存 "+code,
+      status:"ok", err:"", navDate:null, snapshot:true, wantCur:curM?curM[0]:null};
+    if(!(units>0)||!(nav>0)){ e.status="err"; e.err="單位數或平均申購淨值缺漏"; }
+    entries.push(e);
+    if(divAmt>0 && e.status==="ok")
+      entries.push({line:i+2, key:e.key, rawName, type:"DIV", date:navDate, amount:divAmt, units:null, nav:null,
+        fee:0, note:"基富通累積配息", status:"ok", err:"", navDate:null, snapshot:true, wantCur:e.wantCur});
+  });
+  if(!entries.length){ st.textContent="❌ 報表無資料列"; return; }
+  const groups = new Map();
+  entries.forEach(e=>{ if(e.status!=="err" && !groups.has(e.key))
+    groups.set(e.key, {key:e.key, rawName:e.rawName, wantCur:e.wantCur, holding:null, candidates:[], chosen:0, hist:null, error:null}); });
+  csvState = {entries, groups, fundrich:true};
+  let gi = 0;
+  for(const g of groups.values()){
+    gi++;
+    st.innerHTML = `<span class="spin"></span> 比對基金 ${gi}/${groups.size}：${esc(g.key)}…`;
+    const ex = holdings.find(h=>h.fundName===g.key || h.fundName===g.rawName);
+    if(ex){ g.holding = ex; g.candidates = [{secId:ex.fundCode, name:ex.fundName, currency:ex.currency, isin:ex.isin||""}]; continue; }
+    // 漸進式關鍵字搜尋：全名 → 去「證券投資信託」→ 去級別後綴 → 去「基金」字尾
+    const norm = g.key.replace(/[—－–]/g,"-");   // 全形/長破折號 → 半形
+    const base = norm.split("-")[0].replace(/證券投資信託/g,"").replace(/[(（].*$/,"").trim();
+    const tries = [...new Set([
+      norm,
+      norm.replace(/證券投資信託/g,""),
+      base,
+      base.replace(/基金$/,""),
+      base.replace(/基金$/,"").slice(0,5)
+    ])].filter(t=>t.length>=2);
+    let found = [];
+    for(const t of tries){
+      try{ found = await msSearch(t); }
+      catch(err){ g.error = "搜尋失敗："+err.message; break; }
+      if(found.length) break;
+    }
+    if(g.error) continue;
+    if(!found.length){ g.error = "查無此基金"; continue; }
+    g.candidates = found;
+    g.chosen = frPickDefault(found, g.rawName, g.wantCur);
+  }
+  await fillCsvNavs();
+  dedupeCsv();
+  renderCsvPreview();
+  $("#csvStatus").innerHTML += '　<span class="subTxt">基富通庫存彙總：每基金以平均申購淨值記一筆（XIRR 僅供參考），請於下拉選單確認級別是否正確。</span>';
+}
+
+async function fillCsvNavs(){
+  const {entries, groups} = csvState;
+  const st = $("#csvStatus");
+  for(const g of groups.values()){
+    if(g.error) continue;
+    const rows = entries.filter(e=>e.key===g.key && e.status!=="err");
+    const purRows = rows.filter(e=>e.type!=="DIV");
+    const cand = g.candidates[g.chosen];
+    // 需要查淨值（淨值空白或單位數待算）的範圍
+    const need = purRows.filter(e=>!(e.nav>0));
+    if(need.length){
+      const ds = need.map(e=>e.date).sort();
+      st.innerHTML = `<span class="spin"></span> 查詢 ${esc(cand.name)} 歷史淨值…`;
+      try{
+        g.hist = await msHistory(cand.secId, addDays(ds[0],-1), addDays(ds[ds.length-1],8), cand.currency);
+      }catch(err){ g.hist = null; }
+    }
+    purRows.forEach(e=>{
+      if(!(e.nav>0)){
+        const nv = g.hist ? findNavInList(g.hist, e.date) : null;
+        if(!nv){ e.status="err"; e.err="查無該日（含順延7日）淨值，請自填淨值"; return; }
+        e.nav = nv.nav;
+        e.navDate = nv.date;   // 假日順延後的實際淨值日
+      }
+      if(!(e.units>0)) e.units = +(e.amount/e.nav).toFixed(4);
+      if(!(e.amount>0)) e.amount = null;
+    });
+  }
+}
+
+function dedupeCsv(){
+  const {entries, groups} = csvState;
+  const seen = new Set();
+  entries.forEach(e=>{
+    if(e.status==="err") return;
+    const g = groups.get(e.key);
+    if(!g || g.error){ e.status="err"; e.err = g ? g.error : "基金比對失敗"; return; }
+    const recDate = e.navDate || e.date;
+    const sig = g.candidates[g.chosen].secId + "|" + e.type + "|" + recDate + "|" + (e.type==="DIV"?e.amount:e.units);
+    if(seen.has(sig)){ e.status="dup"; e.err="批次內重複"; return; }
+    seen.add(sig);
+    const h = g.holding;
+    if(h){
+      // 庫存彙總列：已持有（有任何記錄）就略過，避免重複計算整筆部位
+      if(e.snapshot && (h.purchases.length || (h.dividends||[]).length)){ e.status="dup"; e.err="已持有此基金，彙總列略過"; return; }
+      if(e.type==="DIV"){
+        if((h.dividends||[]).some(d=>d.date===e.date && Math.abs(+d.amount-e.amount)<0.01)){ e.status="dup"; e.err="已存在相同配息"; }
+      }else{
+        if(h.purchases.some(p=>p.date===recDate && (Math.abs(+p.units-e.units)<0.0001 || (e.amount&&p.amount&&Math.abs(+p.amount-e.amount)<0.01)))){ e.status="dup"; e.err="已存在相同買入"; }
+      }
+    }
+  });
+}
+
+function renderCsvPreview(){
+  const {entries, groups} = csvState;
+  const st = $("#csvStatus");
+  const okN = entries.filter(e=>e.status==="ok").length;
+  const dupN = entries.filter(e=>e.status==="dup").length;
+  const errN = entries.filter(e=>e.status==="err").length;
+  st.innerHTML = `共 ${entries.length} 筆：<span class="st-ok">可匯入 ${okN}</span> · <span class="st-dup">重複略過 ${dupN}</span> · <span class="st-err">錯誤 ${errN}</span>`;
+  const typeTxt = {RSP:"定期", LUMP:"單筆", DIV:"配息"};
+  $("#csvPrev").innerHTML = `<table><thead><tr><th>列</th><th>基金</th><th>類型</th><th>日期</th><th>金額</th><th>單位數</th><th>淨值</th><th>狀態</th></tr></thead><tbody>` +
+    entries.map((e,i)=>{
+      const g = groups.get(e.key);
+      let fundCell = esc(e.key);
+      if(g && !g.error && g.candidates.length>1){
+        fundCell = `<select data-gsel="${esc(e.key)}">` + g.candidates.map((c,ci)=>`<option value="${ci}"${ci===g.chosen?" selected":""}>${esc(c.name)}（${esc(c.currency)}）</option>`).join("") + `</select>`;
+      }else if(g && !g.error){
+        const c = g.candidates[g.chosen];
+        fundCell = esc(c.name) + (g.holding?' <span class="subTxt">已持有</span>':' <span class="subTxt">新</span>');
+      }
+      const dateTxt = e.navDate && e.navDate!==e.date ? `${esc(e.date)}<span class="subTxt">→${esc(e.navDate.slice(5))}</span>` : esc(e.date||"");
+      const stTxt = e.status==="ok" ? '<span class="st-ok">✓ 匯入</span>' : (e.status==="dup" ? `<span class="st-dup">略過：${esc(e.err)}</span>` : `<span class="st-err">✗ ${esc(e.err)}</span>`);
+      return `<tr><td>${e.line}</td><td>${fundCell}</td><td>${typeTxt[e.type]||"?"}</td><td>${dateTxt}</td><td>${e.amount!=null?fmtN(e.amount,0):"—"}</td><td>${e.type==="DIV"?"—":(e.units!=null?fmtN(e.units,4):"—")}</td><td>${e.type==="DIV"?"—":(e.nav!=null?fmtN(e.nav, e.nav>=100?2:4):"—")}</td><td>${stTxt}</td></tr>`;
+    }).join("") + `</tbody></table>`;
+  $("#btnCsvOk").disabled = okN===0;
+  // 多候選下拉 → 重新比對該基金
+  document.querySelectorAll('#csvPrev select[data-gsel]').forEach(sel=>{
+    sel.onchange = async ()=>{
+      const g = csvState.groups.get(sel.dataset.gsel);
+      g.chosen = +sel.value; g.hist = null;
+      // 重設該基金各列的查詢結果後重新填值
+      csvState.entries.forEach(e=>{
+        if(e.key===g.key && (e.status==="ok"||e.status==="dup"||(e.status==="err"&&/淨值/.test(e.err)))){
+          e.status="ok"; e.err=""; e.navDate=null;
+          if(!e._userNav) e.nav = e._origNav ?? e.nav;
+        }
+      });
+      await fillCsvNavs();
+      dedupeCsv();
+      renderCsvPreview();
+    };
+  });
+}
+
+async function confirmCsvImport(){
+  if(!csvState) return;
+  const {entries, groups} = csvState;
+  const newHoldings = [];
+  let nPur = 0, nDiv = 0;
+  entries.filter(e=>e.status==="ok").forEach(e=>{
+    const g = groups.get(e.key);
+    const c = g.candidates[g.chosen];
+    let h = g.holding || holdings.find(x=>x.fundCode===c.secId);
+    if(!h){
+      h = {id:uid("holding"), fundCode:c.secId, fundName:c.name, currency:c.currency, isin:c.isin||"", purchases:[], dividends:[], rspPlans:[]};
+      holdings.push(h); newHoldings.push(h);
+      g.holding = h;
+    }
+    if(e.type==="DIV"){
+      h.dividends.push({divId:uid("d"), date:e.date, amount:e.amount, note:e.note||""});
+      nDiv++;
+    }else{
+      h.purchases.push({purchaseId:uid("p"), type:e.type, date:(e.navDate||e.date), units:e.units, navAtPurchase:e.nav,
+        amount:(e.amount>0?e.amount:null), fee:(e.fee>0?e.fee:0), note:e.note||""});
+      nPur++;
+    }
+    if(g.hist && g.hist.length){ mergeHistory(h, g.hist); g.hist = null; } // 順手存進快取
+  });
+  holdings.forEach(h=>{ h.purchases.sort((a,b)=>b.date.localeCompare(a.date)); (h.dividends||[]).sort((a,b)=>b.date.localeCompare(a.date)); });
+  lsSet(LS_H, holdings);
+  if(!selectedId && holdings.length) selectedId = holdings[0].id;
+  $("#dlgCsv").close();
+  renderAll();
+  toast(`✅ 已匯入 ${nPur} 筆買入、${nDiv} 筆配息${newHoldings.length?`（新增 ${newHoldings.length} 支基金）`:""}`, 3800);
+  // 背景補抓新基金完整歷史
+  for(const h of newHoldings){ await updateFund(h); renderAll(false); }
+  if(newHoldings.length) renderAll();
+}
+
+/* ---- 匯出基富通格式報表 ---- */
+const FR_CURNAME = {TWD:"台幣",USD:"美金",EUR:"歐元",JPY:"日圓",AUD:"澳幣",NZD:"紐幣",GBP:"英鎊",HKD:"港幣",CNY:"人民幣",ZAR:"南非幣",SGD:"新加坡幣",CAD:"加幣",CHF:"瑞士法郎"};
+function buildFrCsv(){
+  const q  = s => /[",]/.test(String(s)) ? '"'+String(s).replace(/"/g,'""')+'"' : String(s);
+  const n0 = v => v==null||isNaN(v) ? "--" : q(Math.round(v).toLocaleString("en-US"));
+  const n2 = v => v==null||isNaN(v) ? "--" : q((+v).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}));
+  const pc = v => v==null||isNaN(v) ? "--" : (+v).toFixed(2);
+  const header = "基金代碼,基金名稱,投資本金,庫存單位數,可贖回單位數,參考市值（幣別）,參考市值,參考損益（幣別）,參考損益(含息含手續費),參考損益(含息不含手續費),參考損益(不含息含手續費),參考損益(不含息不含手續費),報酬率(含息含手續費),報酬率(含息不含手續費),報酬率(不含息含手續費),報酬率(不含息不含手續費),計價幣別,最新淨值（幣別）,最新淨值,淨值日期,交易幣別,累積配息金額（幣別）,累積配息金額,參考匯率,平均申購淨值（幣別）,平均申購淨值,台幣本金(不含息不含手續費)";
+  const lines = holdings.map(h=>{
+    const l = latest(h), units = totUnits(h);
+    const principal = h.purchases.reduce((s,p)=>s+((p.amount!=null&&+p.amount>0)?+p.amount:(+p.units||0)*(+p.navAtPurchase||0)),0);
+    const fees = h.purchases.reduce((s,p)=>s+(+p.fee||0),0);
+    const div = totDiv(h);
+    const value = (l&&units>0) ? units*l.nav : null;
+    const avg = avgNav(h), fx = fxOf(h);
+    const curName = (FR_CURNAME[h.currency]||h.currency)+" "+h.currency;
+    const pl = (incDiv,incFee)=> value==null ? null : value+(incDiv?div:0)-principal-(incFee?fees:0);
+    const rt = (incDiv,incFee)=>{ const v=pl(incDiv,incFee), base=principal+(incFee?fees:0); return (v!=null&&base>0)? v/base*100 : null; };
+    const navDateTxt = l ? (d=>`${+d[0]}/${+d[1]}/${+d[2]}`)(l.date.split("-")) : "--";
+    return [
+      "'"+(h.isin||h.fundCode), q(h.fundName),
+      n0(principal), n2(units), n2(units),
+      h.currency, n0(value), h.currency,
+      n0(pl(true,true)), n0(pl(true,false)), n0(pl(false,true)), n0(pl(false,false)),
+      pc(rt(true,true)), pc(rt(true,false)), pc(rt(false,true)), pc(rt(false,false)),
+      curName, h.currency, l?l.nav:"--", navDateTxt, curName,
+      h.currency, n0(div), +(+fx).toFixed(4), h.currency, avg!=null?+avg.toFixed(4):"--", n0(principal*fx)
+    ].join(",");
+  });
+  return "﻿"+header+"\r\n"+lines.join("\r\n")+"\r\n";
+}
+function frExportCsv(){
+  if(!holdings.length){ toast("尚無持有基金可匯出"); return; }
+  const blob = new Blob([buildFrCsv()],{type:"text/csv;charset=utf-8"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "投資總覽_全部基金_匯出報表_"+todayStr().replaceAll("-","")+".csv";
+  a.click(); URL.revokeObjectURL(a.href);
+  toast("已匯出基富通格式報表");
+}
+
+/* ---------------- 事件 ---------------- */
+$("#btnAdd").onclick = openAdd;
+$("#btnRefresh").onclick = ()=>updateAll(false);
+$("#btnExport").onclick = doExport;
+$("#btnImport").onclick = ()=>$("#importFile").click();
+$("#importFile").onchange = e=>{ if(e.target.files[0]) doImport(e.target.files[0]); e.target.value=""; };
+$("#btnCsv").onclick = openCsv;
+$("#btnCsvPick").onclick = ()=>$("#csvFile").click();
+$("#btnCsvTpl").onclick = downloadCsvTemplate;
+$("#btnCsvExport").onclick = frExportCsv;
+$("#csvFile").onchange = async e=>{
+  const f = e.target.files[0]; e.target.value="";
+  if(!f) return;
+  try{ await processCsvText(await readCsvFile(f)); }
+  catch(err){ $("#csvStatus").textContent = "❌ 讀取失敗："+err.message; }
+};
+$("#btnCsvOk").onclick = confirmCsvImport;
+$("#btnTheme").onclick = ()=>{
+  settings.theme = (document.body.dataset.theme==="light")?"dark":"light";
+  document.body.dataset.theme = settings.theme;
+  lsSet(LS_S,settings); renderChart();
+};
+$("#searchInput").addEventListener("input", ()=>{ clearTimeout(searchTimer); searchTimer=setTimeout(doSearch, 450); });
+$("#searchInput").addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); clearTimeout(searchTimer); doSearch(); }});
+$("#searchResults").onclick = e=>{
+  const it = e.target.closest(".sr-item"); if(!it) return;
+  pickFund($("#searchResults")._rows[+it.dataset.i]);
+};
+$("#btnBackSearch").onclick = ()=>{
+  $("#addStep1").hidden=false; $("#addStep2").hidden=true;
+  $("#btnConfirmAdd").hidden=true; $("#btnBackSearch").hidden=true;
+  $("#dlgAddTitle").textContent="新增基金";
+};
+$("#btnNavLookup").onclick = ()=>{ if(picked) navLookup(picked.secId, picked.currency, $("#pDate").value, $("#pNav"), $("#btnNavLookup")); };
+$("#btnConfirmAdd").onclick = confirmAdd;
+
+$("#tbody").onclick = e=>{
+  const btn = e.target.closest("button[data-act]");
+  if(btn){
+    const id = btn.dataset.id, h = holdings.find(x=>x.id===id);
+    if(btn.dataset.act==="del"){
+      if(confirm(`確定刪除「${h.fundName}」及其所有買入記錄？`)){
+        holdings = holdings.filter(x=>x.id!==id);
+        try{ localStorage.removeItem(NAV_PREFIX+h.fundCode); }catch(_){}
+        if(selectedId===id) selectedId = holdings.length?holdings[0].id:null;
+        lsSet(LS_H,holdings); renderAll();
+      }
+    }else if(btn.dataset.act==="mng"){ openMng(id); }
+    else if(btn.dataset.act==="buy"){ openMng(id); openPurEdit(null); }
+    return;
+  }
+  const tr = e.target.closest("tr[data-id]");
+  if(tr){
+    if(e.target.classList.contains("unitsCell")){ openMng(tr.dataset.id); return; }
+    selectedId = tr.dataset.id;
+    chartView = "fund";
+    renderAll();
+  }
+};
+$("#tbody").addEventListener("contextmenu", e=>{
+  const tr = e.target.closest("tr[data-id]");
+  if(tr){ e.preventDefault(); openMng(tr.dataset.id); }
+});
+document.querySelectorAll("thead th[data-k]").forEach(th=>{
+  th.onclick = ()=>{
+    const k = th.dataset.k;
+    if(sortKey===k) sortAsc=!sortAsc; else { sortKey=k; sortAsc=true; }
+    renderTable();
+  };
+});
+$("#rangeTabs").onclick = e=>{
+  const b = e.target.closest(".tab"); if(!b||b.disabled) return;
+  if(b.dataset.r==="自訂"){
+    $("#crStart").value = customRange?customRange.start:addDays(todayStr(),-90);
+    $("#crEnd").value = customRange?customRange.end:todayStr();
+    $("#dlgRange").showModal();
+    return;
+  }
+  curRange = b.dataset.r;
+  settings.defaultChartRange = curRange; lsSet(LS_S,settings);
+  renderAll();
+};
+$("#btnRangeOk").onclick = ()=>{
+  const s=$("#crStart").value, en=$("#crEnd").value;
+  if(!s||!en||s>=en){ toast("請選擇有效的日期區間"); return; }
+  customRange={start:s,end:en}; curRange="自訂";
+  $("#dlgRange").close(); renderAll();
+};
+$("#modeToggle").onclick = ()=>{
+  chartMode = chartMode==="pct"?"nav":"pct";
+  $("#modeToggle").textContent = chartMode==="pct"?"%":"NAV";
+  $("#modeToggle").classList.toggle("on", chartMode==="nav");
+  renderChart();
+};
+$("#btnPortfolio").onclick = ()=>{
+  chartView = chartView==="portfolio" ? "fund" : "portfolio";
+  renderTabs(); renderChart();
+};
+$("#btnAddPur").onclick = ()=>openPurEdit(null);
+$("#btnPurCancel").onclick = ()=>{ $("#purEdit").hidden=true; editPurId=null; };
+$("#btnPurSave").onclick = savePur;
+
+/* 金額/淨值 → 單位數 自動換算 */
+$("#pAmt").addEventListener("input", ()=>syncUnits($("#pAmt"), $("#pNav"), $("#pUnits")));
+$("#pNav").addEventListener("input", ()=>{ if(parseFloat($("#pAmt").value)>0) syncUnits($("#pAmt"), $("#pNav"), $("#pUnits")); });
+$("#eAmt").addEventListener("input", ()=>syncUnits($("#eAmt"), $("#eNav"), $("#eUnits")));
+$("#eNav").addEventListener("input", ()=>{ if(parseFloat($("#eAmt").value)>0) syncUnits($("#eAmt"), $("#eNav"), $("#eUnits")); });
+
+/* 配息記錄 */
+function openDivEdit(did){
+  editDivId = did;
+  const h = holdings.find(x=>x.id===mngHoldingId);
+  const d = did ? (h.dividends||[]).find(x=>x.divId===did) : null;
+  $("#eDivDate").value = d?d.date:todayStr();
+  $("#eDivAmt").value = d?d.amount:"";
+  $("#eDivNote").value = d?(d.note||""):"";
+  $("#divEdit").hidden = false;
+  $("#eDivAmt").focus();
+}
+$("#btnAddDiv").onclick = ()=>openDivEdit(null);
+$("#btnDivCancel").onclick = ()=>{ $("#divEdit").hidden=true; editDivId=null; };
+$("#btnDivSave").onclick = ()=>{
+  const h = holdings.find(x=>x.id===mngHoldingId); if(!h) return;
+  const amt = parseFloat($("#eDivAmt").value);
+  if(!(amt>0)){ toast("配息金額需大於 0"); return; }
+  const obj = {date:$("#eDivDate").value||todayStr(), amount:amt, note:$("#eDivNote").value.trim()};
+  h.dividends = h.dividends||[];
+  if(editDivId){
+    const d = h.dividends.find(x=>x.divId===editDivId); Object.assign(d,obj);
+  }else{
+    h.dividends.push(Object.assign({divId:uid("d")},obj));
+  }
+  h.dividends.sort((a,b)=>b.date.localeCompare(a.date));
+  lsSet(LS_H,holdings);
+  $("#divEdit").hidden=true; editDivId=null;
+  renderDivTable(); renderPurTable(); renderAll();
+};
+$("#divBody").onclick = e=>{
+  const ed = e.target.closest("button[data-dedit]"), dl = e.target.closest("button[data-ddel]");
+  if(ed){ openDivEdit(ed.dataset.dedit); }
+  else if(dl){
+    const h = holdings.find(x=>x.id===mngHoldingId);
+    if(confirm("確定刪除此筆配息記錄？")){
+      h.dividends = (h.dividends||[]).filter(d=>d.divId!==dl.dataset.ddel);
+      lsSet(LS_H,holdings); renderDivTable(); renderPurTable(); renderAll();
+    }
+  }
+};
+
+/* 定期定額排程 */
+$("#btnRspAdd").onclick = ()=>{
+  const h = holdings.find(x=>x.id===mngHoldingId); if(!h) return;
+  const day = parseInt($("#rspDay").value,10), amt = parseFloat($("#rspAmt").value), fee = parseFloat($("#rspFee").value)||0;
+  const start = $("#rspStart").value;
+  if(!(day>=1&&day<=31)){ toast("扣款日需為 1–31"); return; }
+  if(!(amt>0)){ toast("請輸入每期金額"); return; }
+  if(!start){ toast("請選擇開始日期"); return; }
+  h.rspPlans = h.rspPlans||[];
+  h.rspPlans.push({planId:uid("plan"), dayOfMonth:day, amount:amt, fee:(fee>0?fee:0), startDate:start, enabled:true, lastApplied:null});
+  lsSet(LS_H,holdings);
+  $("#rspDay").value=""; $("#rspAmt").value=""; $("#rspFee").value="";
+  renderRspList();
+  const n = applyRspPlans();
+  if(!n) toast("已建立排程");
+  renderRspList(); renderPurTable();
+};
+$("#rspList").onclick = e=>{
+  const tg = e.target.closest("button[data-ptoggle]"), dl = e.target.closest("button[data-pldel]");
+  const h = holdings.find(x=>x.id===mngHoldingId); if(!h) return;
+  if(tg){
+    const pl = h.rspPlans.find(x=>x.planId===tg.dataset.ptoggle);
+    pl.enabled = pl.enabled===false ? true : false;
+    lsSet(LS_H,holdings); renderRspList();
+    if(pl.enabled){ applyRspPlans(); renderRspList(); renderPurTable(); }
+  }else if(dl){
+    if(confirm("確定刪除此排程？（已自動補上的買入記錄會保留）")){
+      h.rspPlans = h.rspPlans.filter(x=>x.planId!==dl.dataset.pldel);
+      lsSet(LS_H,holdings); renderRspList();
+    }
+  }
+};
+$("#btnENavLookup").onclick = ()=>{
+  const h = holdings.find(x=>x.id===mngHoldingId);
+  if(h) navLookup(h.fundCode, h.currency, $("#eDate").value, $("#eNav"), $("#btnENavLookup"));
+};
+$("#purBody").onclick = e=>{
+  const ed = e.target.closest("button[data-pedit]"), dl = e.target.closest("button[data-pdel]");
+  if(ed){ openPurEdit(ed.dataset.pedit); }
+  else if(dl){
+    const h = holdings.find(x=>x.id===mngHoldingId);
+    if(confirm("確定刪除此筆買入記錄？")){
+      h.purchases = h.purchases.filter(p=>p.purchaseId!==dl.dataset.pdel);
+      lsSet(LS_H,holdings); renderPurTable(); renderAll();
+    }
+  }
+};
+document.querySelectorAll("[data-close]").forEach(b=>{ b.onclick = ()=>document.getElementById(b.dataset.close).close(); });
+window.addEventListener("resize", ()=>{ if(chart) chart.resize(); });
+
+/* ---------------- PWA ---------------- */
+(function(){
+  try{
+    const manifest = {name:"基金追蹤", short_name:"基金追蹤", start_url:".", display:"standalone",
+      background_color:"#0f1622", theme_color:"#1a2332",
+      icons:[{src:"data:image/svg+xml,"+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="20" fill="#1a2332"/><text x="50" y="68" font-size="52" text-anchor="middle">📈</text></svg>'), sizes:"any", type:"image/svg+xml"}]};
+    const link = document.createElement("link");
+    link.rel="manifest";
+    link.href="data:application/manifest+json,"+encodeURIComponent(JSON.stringify(manifest));
+    document.head.appendChild(link);
+    if("serviceWorker" in navigator && (location.protocol==="https:" || location.hostname==="localhost")){
+      navigator.serviceWorker.register("./sw.js").catch(()=>{});
+    }
+  }catch(e){}
+})();
+
+/* ---------------- 啟動 ---------------- */
+(function init(){
+  document.body.dataset.theme = settings.theme||"light";
+  curRange = settings.defaultChartRange||"3M";
+  if(!RANGES.some(r=>r[0]===curRange)) curRange="3M";
+  if(holdings.length) selectedId = holdings[0].id;
+  renderAll();
+  applyRspPlans();   // 用快取淨值先補；更新完成後會再補一次
+  const last = settings._lastRefresh ? new Date(settings._lastRefresh) : null;
+  if(last) $("#updStatus").textContent = "上次更新 " + last.toLocaleString("zh-TW",{hour12:false});
+  if(settings.refreshOnOpen!==false && holdings.length){
+    const stale = !last || (Date.now()-last.getTime() > 6*3600*1000);
+    if(stale) updateAll(false);
+  }
+})();
+</script>
+</body>
+</html>
