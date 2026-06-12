@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#1a2332">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>基金追蹤</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js" integrity="sha384-XcdcwHqIPULERb2yDEM4R0XaQKU3YnDsrTmjACBZyfdVVqjh6xQ4/DCMd7XLcA6Y" crossorigin="anonymous"></script>
 <style>
 :root{
   --bg:#f4f6f9; --panel:#ffffff; --panel2:#eef1f5; --border:#d8dee8;
@@ -506,6 +506,9 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
    v1.3 新增：庫存基金互比、基金與市場比較、多來源 API 備援
    v1.4 新增：股票／ETF 持倉、股數與交易成本、跨資產比較
    v1.5 新增：營業日短區間、台股休市狀態、桌面與手機操作介面優化
+   v1.6 安全強化：匯入資料消毒（ID 重生成/列舉白名單/數值驗證）、
+        動態 HTML 全面跳脫、Chart.js SRI、addDays 時區修正、
+        股票強制更新 fresh、開啟自動更新改依上一營業日判斷
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
@@ -551,7 +554,14 @@ const $ = s => document.querySelector(s);
 const fmtN = (n, d=2) => (n==null||isNaN(n)) ? "—" : n.toLocaleString("zh-TW",{minimumFractionDigits:d,maximumFractionDigits:d});
 const fmtMoney = n => (n==null||isNaN(n)) ? "—" : "NT$ " + Math.round(n).toLocaleString("zh-TW");
 const todayStr = () => { const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
-const addDays = (s, n) => { const d=new Date(s+"T00:00:00"); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); };
+// 以本地時間組字串（toISOString 是 UTC，在 UTC+8 會少一天）
+const addDays = (s, n) => { const d=new Date(s+"T00:00:00"); d.setDate(d.getDate()+n); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
+// 上一個營業日（僅排除週末；國定假日另由淨值資料自然順延）
+function prevBusinessDayStr(){
+  const d = new Date();
+  do { d.setDate(d.getDate()-1); } while(d.getDay()===0 || d.getDay()===6);
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+}
 const clsOf = v => v>0.000001 ? "pos" : (v<-0.000001 ? "neg" : "flat");
 const signed = (v,d=2,suf="") => (v==null||isNaN(v)) ? "—" : (v>0?"+":"") + fmtN(v,d) + suf;
 const uid = p => p + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
@@ -736,9 +746,10 @@ async function assetSearch(term){
   })).filter(item=>item.quote && Number.isFinite(item.quote.price) && item.quote.price>0);
 }
 
-async function stockHistory(symbol, range="10y"){
+async function stockHistory(symbol, range="10y", fresh=false){
   const interval = "1d";
-  const payload = await marketFetch(`/api/yahoo/chart?symbol=${encodeURIComponent(symbol)}&range=${range}&interval=${interval}`,30000);
+  const freshQuery = fresh ? `&fresh=1&_=${Date.now()}` : "";
+  const payload = await marketFetch(`/api/yahoo/chart?symbol=${encodeURIComponent(symbol)}&range=${range}&interval=${interval}${freshQuery}`,30000);
   const history = parseMarketHistory(payload).map(point=>({date:point.date,nav:point.value}));
   if(history.length<2) throw new Error("股票歷史資料不足");
   return {history,source:payload._meta?.source||"unknown"};
@@ -831,7 +842,7 @@ function marketSessionHtml(item, quote){
   const date = tradingDateText(quote?.marketTime);
   if(item.market==="TW"){
     const session = taiwanSessionStatus();
-    return `<span class="market-session">交易日 ${esc(date||"—")} · <span class="session-label ${session.className}">${session.label}</span></span>`;
+    return `<span class="market-session">交易日 ${esc(date||"—")} · <span class="session-label ${session.className}" title="依台北時間平日 09:00–13:30 判斷，國定假日無法偵測">${session.label}</span></span>`;
   }
   return `<span class="market-session">交易日 ${esc(date||"—")}</span>`;
 }
@@ -1314,7 +1325,7 @@ async function updateFund(h, options={}){
   let meta = {};
   if(h.assetType==="stock"){
     try{
-      const result = await stockHistory(h.symbol||h.fundCode,"10y");
+      const result = await stockHistory(h.symbol||h.fundCode,"10y",opts.fresh===true);
       mergeHistory(h,result.history,result.source);
       meta = {source:result.source,fetchedAt:new Date().toISOString()};
       ok = true;
@@ -1324,12 +1335,13 @@ async function updateFund(h, options={}){
     if(h.currency!=="TWD") await ensureFx(h);
     return updateResult(h,before,ok,meta);
   }
-  const quoteTerm = String(h.isin||h.fundCode||"").trim();
+  // 最新淨值校驗僅在有 ISIN 時進行：screener 的 term 搜尋對 SecId 無效，徒增請求
+  const quoteTerm = String(h.isin||"").trim();
   const [historySettled,quoteSettled] = await Promise.allSettled([
     msHistoryResult(h.fundCode,start,todayStr(),h.currency,{fresh:opts.fresh===true}),
     quoteTerm
       ? msSearchResult(quoteTerm,{fresh:opts.fresh===true})
-      : Promise.reject(new Error("基金缺少 ISIN 與 Morningstar SecId"))
+      : Promise.reject(new Error("基金缺少 ISIN，略過最新淨值校驗"))
   ]);
   let historyResult = null;
   if(historySettled.status==="fulfilled"){
@@ -1360,7 +1372,7 @@ async function updateFund(h, options={}){
     }else{
       console.warn(`基金最新淨值查無完全相符項目：${h.fundName}`);
     }
-  }else{
+  }else if(quoteTerm){
     console.error(`基金最新淨值更新失敗：${h.fundName}`,quoteSettled.reason);
   }
   if(!ok){ // TDCC 備援（境外）
@@ -1498,7 +1510,7 @@ function holdingPriceMetaHtml(h,date){
   const label = h.assetType==="stock" ? "交易日" : "淨值日";
   if(h.assetType==="stock" && /\.(TW|TWO)$/.test(h.symbol||h.fundCode)){
     const session = taiwanSessionStatus();
-    return `<span class="price-meta">${label} ${esc(date.replaceAll("-","/"))} · <span class="session-label ${session.className}">${session.label}</span></span>`;
+    return `<span class="price-meta">${label} ${esc(date.replaceAll("-","/"))} · <span class="session-label ${session.className}" title="依台北時間平日 09:00–13:30 判斷，國定假日無法偵測">${session.label}</span></span>`;
   }
   return `<span class="price-meta">${label} ${esc(date.replaceAll("-","/"))}</span>`;
 }
@@ -1576,7 +1588,8 @@ function renderTable(){
     const assetBadge = d.h.assetType==="stock"
       ? '<span class="badge LUMP">股票</span> '
       : '<span class="badge FUND">基金</span> ';
-    return `<tr data-id="${d.h.id}"${sel}>
+    const hid = esc(d.h.id);
+    return `<tr data-id="${hid}"${sel}>
       <td title="${esc(d.h.fundName)}">${assetBadge}${esc(d.h.fundName)}<br><span class="subTxt">${esc(d.h.currency)}${d.h.assetType==="stock"&&d.h.symbol?" · "+esc(d.h.symbol):(d.h.isin?" · "+esc(d.h.isin):"")}</span></td>
       <td><span class="current-price">${fmtN(d.nav, d.nav!=null&&d.nav>=100?2:4)}</span>${holdingPriceMetaHtml(d.h,d.navDate)}</td>
       <td>${dayTxt}</td>
@@ -1588,10 +1601,10 @@ function renderTable(){
       <td class="${clsOf(d.plPct??0)}">${d.plPct!=null?signed(d.plPct,2,"%"):"—"}</td>
       <td class="${clsOf(d.rangePct??0)}">${d.rangePct!=null?signed(d.rangePct,2,"%"):"—"}</td>
       <td class="operation-cell"><span class="rowBtns">
-        <button data-act="buy" data-id="${d.h.id}" title="新增買入">＋買入</button>
-        <button data-act="mng" data-id="${d.h.id}" title="管理買入記錄">管理</button>
-        <button data-act="cmp" data-id="${d.h.id}" title="與其他基金或市場比較">比較</button>
-        <button data-act="del" data-id="${d.h.id}" title="刪除持倉">🗑</button>
+        <button data-act="buy" data-id="${hid}" title="新增買入">＋買入</button>
+        <button data-act="mng" data-id="${hid}" title="管理買入記錄">管理</button>
+        <button data-act="cmp" data-id="${hid}" title="與其他基金或市場比較">比較</button>
+        <button data-act="del" data-id="${hid}" title="刪除持倉">🗑</button>
       </span></td>
     </tr>`;
   }).join("");
@@ -2097,11 +2110,13 @@ function renderPurTable(){
   $("#purBody").innerHTML = h.purchases.map(p=>{
     const amtTxt = (p.amount!=null&&p.amount>0) ? fmtN(+p.amount,0) : fmtN((+p.units||0)*(+p.navAtPurchase||0),0);
     const feeTxt = (+p.fee>0) ? `<br><span class="subTxt">費 ${fmtN(+p.fee,0)}</span>` : "";
+    const typeCls = p.type==="LUMP" ? "LUMP" : "RSP";   // class 僅允許白名單值
+    const pid = esc(p.purchaseId);
     return `<tr>
-    <td><span class="badge ${p.type}">${h.assetType==="stock"?"股票":(p.type==="RSP"?"定期":"單筆")}</span></td>
+    <td><span class="badge ${typeCls}">${h.assetType==="stock"?"股票":(typeCls==="RSP"?"定期":"單筆")}</span></td>
     <td>${esc(p.date)}</td><td>${amtTxt}${feeTxt}</td><td>${fmtN(+p.units,4)}</td><td>${fmtN(+p.navAtPurchase, p.navAtPurchase>=100?2:4)}</td>
     <td style="max-width:110px;overflow:hidden;text-overflow:ellipsis" title="${esc(p.note)}">${esc(p.note||"")}</td>
-    <td class="act"><button data-pedit="${p.purchaseId}" title="編輯">✏️</button><button data-pdel="${p.purchaseId}" title="刪除">🗑️</button></td>
+    <td class="act"><button data-pedit="${pid}" title="編輯">✏️</button><button data-pdel="${pid}" title="刪除">🗑️</button></td>
   </tr>`;}).join("") + `<tr class="totRow"><td>合計</td><td></td><td>${fmtN(cost,0)}</td><td>${fmtN(u,4)}</td><td>${avg?("均價 "+fmtN(avg, avg>=100?2:4)):"—"}</td><td></td><td></td></tr>`;
   const r = fundXirr(h);
   $("#mngXirr").textContent = "年化報酬(XIRR)：" + (r!=null ? signed(r*100,2,"%") : "—") + "　含息損益：" + signed((rowData(h).pl??0),0) + "（" + h.currency + "）";
@@ -2113,7 +2128,7 @@ function renderDivTable(){
   $("#divBody").innerHTML = divs.length ? divs.map(d=>`<tr>
     <td>${esc(d.date)}</td><td>${fmtN(+d.amount,2)}</td>
     <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${esc(d.note)}">${esc(d.note||"")}</td>
-    <td class="act"><button data-dedit="${d.divId}" title="編輯">✏️</button><button data-ddel="${d.divId}" title="刪除">🗑️</button></td>
+    <td class="act"><button data-dedit="${esc(d.divId)}" title="編輯">✏️</button><button data-ddel="${esc(d.divId)}" title="刪除">🗑️</button></td>
   </tr>`).join("") : `<tr><td colspan="4" class="subTxt" style="text-align:center">尚無配息記錄</td></tr>`;
 }
 function renderRspList(){
@@ -2121,10 +2136,10 @@ function renderRspList(){
   if(h.assetType==="stock"){ $("#rspList").innerHTML='<div class="subTxt">股票不使用基金淨值定期定額排程；可用「新增買入記錄」手動加碼。</div>'; return; }
   const plans = h.rspPlans||[];
   $("#rspList").innerHTML = plans.length ? plans.map(pl=>`<div class="planRow${pl.enabled===false?" off":""}">
-    <span>每月 <b>${pl.dayOfMonth}</b> 日 · ${fmtN(+pl.amount,0)} ${esc(h.currency)}${pl.fee>0?`（費 ${fmtN(+pl.fee,0)}）`:""} · 自 ${esc(pl.startDate)}${pl.lastApplied?` · 已扣至 ${esc(pl.lastApplied)}`:""}</span>
+    <span>每月 <b>${esc(String(pl.dayOfMonth))}</b> 日 · ${fmtN(+pl.amount,0)} ${esc(h.currency)}${pl.fee>0?`（費 ${fmtN(+pl.fee,0)}）`:""} · 自 ${esc(pl.startDate)}${pl.lastApplied?` · 已扣至 ${esc(pl.lastApplied)}`:""}</span>
     <span class="rowBtns">
-      <button data-ptoggle="${pl.planId}">${pl.enabled===false?"啟用":"停用"}</button>
-      <button data-pldel="${pl.planId}">🗑</button>
+      <button data-ptoggle="${esc(pl.planId)}">${pl.enabled===false?"啟用":"停用"}</button>
+      <button data-pldel="${esc(pl.planId)}">🗑</button>
     </span>
   </div>`).join("") : `<div class="subTxt" style="margin-bottom:8px">尚無排程</div>`;
 }
@@ -2135,7 +2150,9 @@ function openPurEdit(pid){
   const p = pid ? h.purchases.find(x=>x.purchaseId===pid) : null;
   const isStock = h.assetType==="stock";
   $("#purEditTitle").textContent = p ? "編輯記錄" : "新增記錄";
-  document.querySelector(`input[name=eType][value=${isStock?"LUMP":(p?p.type:"RSP")}]`).checked = true;
+  // type 僅允許白名單值，避免任意字串進入選擇器
+  const eType = isStock ? "LUMP" : (p && p.type==="LUMP" ? "LUMP" : "RSP");
+  document.querySelector(`input[name=eType][value=${eType}]`).checked = true;
   document.querySelectorAll("input[name=eType]").forEach(input=>input.disabled=isStock);
   $("#eAmtLabel").textContent = isStock ? "成交金額（自動計算）" : "買入金額（計價幣別）";
   $("#eUnitsLabel").textContent = isStock ? "股數" : "買入單位數";
@@ -2181,6 +2198,60 @@ function savePur(){
 }
 
 /* ---------------- 匯出 / 匯入 ---------------- */
+// 匯入資料消毒：重新生成所有 ID、白名單列舉值、驗證數值與日期，防止惡意備份檔注入
+const IMP_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const impStr = (v,max) => String(v??"").slice(0,max);
+const impPosNum = v => { const n=+v; return (Number.isFinite(n)&&n>0) ? n : null; };
+function sanitizeImportedHoldings(list){
+  return (Array.isArray(list)?list:[]).map(h=>{
+    if(!h || typeof h!=="object") return null;
+    const fundCode = impStr(h.fundCode,64).trim();
+    if(!fundCode) return null;
+    const assetType = h.assetType==="stock" ? "stock" : "fund";
+    const curRaw = String(h.currency??"").trim().toUpperCase();
+    const isinRaw = String(h.isin??"").trim().toUpperCase();
+    return {
+      id: uid("holding"),
+      assetType,
+      fundCode,
+      symbol: impStr(h.symbol || (assetType==="stock"?fundCode:""),32).trim(),
+      fundName: impStr(h.fundName,120).trim() || fundCode,
+      currency: /^[A-Z]{3}$/.test(curRaw) ? curRaw : "TWD",
+      isin: /^[A-Z]{2}[A-Z0-9]{9}\d$/.test(isinRaw) ? isinRaw : "",
+      exchange: impStr(h.exchange,24),
+      quoteType: impStr(h.quoteType,12),
+      purchases: (Array.isArray(h.purchases)?h.purchases:[]).map(p=>{
+        if(!p || typeof p!=="object") return null;
+        const units = impPosNum(p.units), nav = impPosNum(p.navAtPurchase);
+        if(!units || !nav || !IMP_DATE_RE.test(String(p.date||""))) return null;
+        return {purchaseId:uid("p"), type:(p.type==="LUMP"?"LUMP":"RSP"), date:p.date, units, navAtPurchase:nav,
+          amount:impPosNum(p.amount), fee:impPosNum(p.fee)||0, note:impStr(p.note,200)};
+      }).filter(Boolean),
+      dividends: (Array.isArray(h.dividends)?h.dividends:[]).map(d=>{
+        if(!d || typeof d!=="object") return null;
+        const amount = impPosNum(d.amount);
+        if(!amount || !IMP_DATE_RE.test(String(d.date||""))) return null;
+        return {divId:uid("d"), date:d.date, amount, note:impStr(d.note,200)};
+      }).filter(Boolean),
+      rspPlans: (Array.isArray(h.rspPlans)?h.rspPlans:[]).map(pl=>{
+        if(!pl || typeof pl!=="object") return null;
+        const day = Math.trunc(+pl.dayOfMonth), amount = impPosNum(pl.amount);
+        if(!(day>=1 && day<=31) || !amount || !IMP_DATE_RE.test(String(pl.startDate||""))) return null;
+        return {planId:uid("plan"), dayOfMonth:day, amount, fee:impPosNum(pl.fee)||0, startDate:pl.startDate,
+          enabled:pl.enabled!==false, lastApplied:IMP_DATE_RE.test(String(pl.lastApplied||""))?pl.lastApplied:null};
+      }).filter(Boolean)
+    };
+  }).filter(Boolean);
+}
+function sanitizeImportedNavCache(key, value){
+  if(!value || typeof value!=="object") return null;
+  const navHistory = (Array.isArray(value.navHistory)?value.navHistory:[])
+    .filter(x=>x && IMP_DATE_RE.test(String(x.date||"")) && Number.isFinite(+x.nav) && +x.nav>0)
+    .map(x=>({date:String(x.date), nav:+x.nav}))
+    .sort((a,b)=>a.date.localeCompare(b.date))
+    .slice(-MAX_HIST);
+  return {fundCode:key, lastUpdated:impStr(value.lastUpdated,40)||null, source:impStr(value.source,60)||null, navHistory};
+}
 function doExport(){
   const data = {exportedAt:new Date().toISOString(), holdings, settings, fx:fxCache, navCaches:{}};
   holdings.forEach(h=>{ data.navCaches[h.fundCode]=getCache(h); });
@@ -2197,11 +2268,33 @@ function doImport(file){
     try{
       const d = JSON.parse(rd.result);
       if(!Array.isArray(d.holdings)) throw new Error("格式不符");
-      holdings = d.holdings; lsSet(LS_H,holdings);
-      if(d.settings){ settings=Object.assign(settings,d.settings); lsSet(LS_S,settings); }
-      if(d.fx){ fxCache=d.fx; lsSet(LS_FX,fxCache); }
+      holdings = sanitizeImportedHoldings(d.holdings); lsSet(LS_H,holdings);
+      if(d.settings && typeof d.settings==="object"){
+        // 僅複製已知設定欄位，避免原型污染與垃圾欄位
+        ["defaultChartRange","currency","refreshOnOpen","theme","swapGainLossColors",
+         "marketSymbols","compareFundIds","marketRange",
+         "_lastRefresh","_lastRefreshAttempt","_lastDataRefresh","_lastFundDateRange"]
+          .forEach(k=>{ if(Object.prototype.hasOwnProperty.call(d.settings,k)) settings[k]=d.settings[k]; });
+        settings.theme = d.settings.theme==="dark" ? "dark" : "light";
+        lsSet(LS_S,settings);
+      }
+      if(d.fx && typeof d.fx==="object"){
+        fxCache = {};
+        Object.entries(d.fx).forEach(([cur,val])=>{
+          if(/^[A-Z]{3}$/.test(cur) && val && Number.isFinite(+val.rate) && +val.rate>0)
+            fxCache[cur] = {rate:+val.rate, date:IMP_DATE_RE.test(String(val.date||""))?val.date:null};
+        });
+        lsSet(LS_FX,fxCache);
+      }
       navMem={};
-      if(d.navCaches){ Object.entries(d.navCaches).forEach(([k,v])=>lsSet(NAV_PREFIX+k,v)); }
+      if(d.navCaches && typeof d.navCaches==="object"){
+        Object.entries(d.navCaches).forEach(([k,v])=>{
+          const key = impStr(k,64).trim();
+          if(!key || !holdings.some(h=>h.fundCode===key)) return;
+          const cache = sanitizeImportedNavCache(key, v);
+          if(cache) lsSet(NAV_PREFIX+key, cache);
+        });
+      }
       selectedId = holdings.length?holdings[0].id:null;
       normalizeHoldings();
       compareFundIds = Array.isArray(settings.compareFundIds)
@@ -2938,7 +3031,9 @@ window.addEventListener("resize", ()=>{ if(chart) chart.resize(); if(marketChart
     : "";
   if(last) setFundUpdateStatus(`${cachedRange?`基金淨值 ${cachedRange} · `:""}上次查詢 ${last.toLocaleString("zh-TW",{hour:"2-digit",minute:"2-digit",hour12:false})}`);
   if(settings.refreshOnOpen!==false && holdings.length){
-    const hasPendingFund = cachedDates.some(date=>date<todayStr());
+    // 淨值 T+1 公布，落後「上一個營業日」才算待更新；避免週末/今日尚未公布時每小時 fresh 重抓
+    const expectedDate = prevBusinessDayStr();
+    const hasPendingFund = cachedDates.some(date=>date<expectedDate);
     const retryMs = hasPendingFund ? 60*60*1000 : 6*60*60*1000;
     const stale = !last || (Date.now()-last.getTime()>retryMs);
     if(stale) updateAll({fresh:hasPendingFund});
