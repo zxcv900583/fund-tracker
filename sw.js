@@ -1,5 +1,5 @@
 /* 基金追蹤 Service Worker — 網路優先、失敗時回退快取（離線可看最後資料） */
-const CACHE_NAME = "fund-tracker-v5";
+const CACHE_NAME = "fund-tracker-v6";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());

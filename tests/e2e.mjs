@@ -455,17 +455,22 @@ async function run() {
 
   const colorsBeforeSwap = await cdp.evaluate(`({
     up:getComputedStyle(document.body).getPropertyValue("--up").trim(),
-    down:getComputedStyle(document.body).getPropertyValue("--down").trim()
+    down:getComputedStyle(document.body).getPropertyValue("--down").trim(),
+    line:chart.data.datasets[0].borderColor,
+    rising:chart.data.datasets[0].data.filter(Number.isFinite).at(-1)>chart.data.datasets[0].data.filter(Number.isFinite)[0]
   })`);
+  assert.equal(colorsBeforeSwap.line,colorsBeforeSwap.rising?colorsBeforeSwap.up:colorsBeforeSwap.down);
   await cdp.evaluate(`document.querySelector("#btnColorSwap").click()`);
   const colorsAfterSwap = await cdp.evaluate(`({
     up:getComputedStyle(document.body).getPropertyValue("--up").trim(),
     down:getComputedStyle(document.body).getPropertyValue("--down").trim(),
+    line:chart.data.datasets[0].borderColor,
     pressed:document.querySelector("#btnColorSwap").getAttribute("aria-pressed"),
     saved:JSON.parse(localStorage.getItem("fund_tracker_settings")).swapGainLossColors
   })`);
   assert.equal(colorsAfterSwap.up, colorsBeforeSwap.down);
   assert.equal(colorsAfterSwap.down, colorsBeforeSwap.up);
+  assert.equal(colorsAfterSwap.line,colorsBeforeSwap.rising?colorsAfterSwap.up:colorsAfterSwap.down);
   assert.equal(colorsAfterSwap.pressed, "true");
   assert.equal(colorsAfterSwap.saved, true);
 

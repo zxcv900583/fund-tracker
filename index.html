@@ -1466,6 +1466,14 @@ function chartTickLimit(){
   return window.matchMedia("(max-width:640px)").matches ? 7 : 10;
 }
 
+function trendColor(values){
+  const valid = (values||[]).filter(Number.isFinite);
+  if(valid.length<2) return getComputedStyle(document.body).getPropertyValue("--flat").trim();
+  const change = valid.at(-1)-valid[0];
+  const variable = change>0.000001 ? "--up" : (change<-0.000001 ? "--down" : "--flat");
+  return getComputedStyle(document.body).getPropertyValue(variable).trim();
+}
+
 function applyGainLossColors(){
   const swapped = settings.swapGainLossColors===true;
   document.body.dataset.colorSwap = String(swapped);
@@ -1631,7 +1639,7 @@ function renderChart(){
   const labels = data.map(x=>x.date);
   const vals = data.map(x=> usePct ? x.nav/baseline*100 : x.nav);
   const lastIdx = vals.length-1;
-  const lineCol = getComputedStyle(document.body).getPropertyValue("--down").trim(); // 紅色走勢線(如截圖)
+  const lineCol = trendColor(data.map(x=>x.nav));
   const visibleStart = data[0].date, visibleEnd = data.at(-1).date;
   const buys = h.purchases.map(p=>({date:p.date, type:p.type})).filter(b=>b.date>=visibleStart&&b.date<=visibleEnd);
 
