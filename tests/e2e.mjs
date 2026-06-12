@@ -263,6 +263,7 @@ async function run() {
     tableRows:document.querySelectorAll("#tbody tr").length,
     compareButtons:document.querySelectorAll('button[data-act="cmp"]').length,
     priceHeading:document.querySelector('th[data-k="nav"]')?.textContent.trim(),
+    fundBadges:[...document.querySelectorAll("#tbody tr .badge.FUND")].map(badge=>badge.textContent.trim()),
     hasPriceDateHeading:[...document.querySelectorAll("#fundTable th")].some(th=>th.textContent.includes("價格日")),
     updateButtonsTogether:document.querySelector("#btnRefresh")?.parentElement===document.querySelector("#btnMarketRefresh")?.parentElement,
     shortRanges:[...document.querySelectorAll("#rangeTabs [data-r]")].map(button=>button.dataset.r).filter(value=>["1D","2D","5D","21D"].includes(value)),
@@ -274,8 +275,9 @@ async function run() {
   })`);
   assert.equal(initial.marketCards, 16);
   assert.equal(initial.tableRows, 2);
-  assert.equal(initial.compareButtons, 4);
+  assert.equal(initial.compareButtons, 2);
   assert.equal(initial.priceHeading, "目前價格");
+  assert.deepEqual(initial.fundBadges,["基金","基金"]);
   assert.equal(initial.hasPriceDateHeading, false);
   assert.equal(initial.updateButtonsTogether, true);
   assert.deepEqual(initial.shortRanges, ["1D","2D","5D","21D"]);
@@ -285,6 +287,24 @@ async function run() {
   assert.match(initial.summaryCost, /2,010/);
   assert.ok(initial.fundChartPoints > 20);
   assert.equal(initial.workerBase, localWorker);
+
+  const refreshResults = await cdp.evaluate(`updateAll({fresh:true})`);
+  assert.equal(refreshResults.length,2);
+  assert.equal(refreshResults[0].latestDate,"2026-06-12");
+  assert.equal(refreshResults[0].changed,true);
+  const refreshFeedback = await cdp.evaluate(`({
+    status:document.querySelector("#updStatus").textContent,
+    toast:document.querySelector("#toast").textContent,
+    live:document.querySelector("#toast").getAttribute("aria-live"),
+    latestDate:JSON.parse(localStorage.getItem("fund_tracker_nav_cache_F0HKG05X2C")).navHistory.at(-1).date
+  })`);
+  assert.match(refreshFeedback.status,/基金淨值 06\/12/);
+  assert.match(refreshFeedback.status,/查詢/);
+  assert.match(refreshFeedback.toast,/取得新資料|目前沒有新資料/);
+  assert.equal(refreshFeedback.live,"polite");
+  assert.equal(refreshFeedback.latestDate,"2026-06-12");
+  cdp.events.length = 0;
+  console.log("[e2e] NAV refresh date and completion feedback passed");
 
   await cdp.evaluate(`document.querySelector("#btnCompare").click()`);
   await waitForPage(cdp, `marketChart?.data?.datasets?.length===3`, 45000);
@@ -489,9 +509,21 @@ async function run() {
     bodyWidth:document.body.scrollWidth,
     actionDockPosition:getComputedStyle(document.querySelector("#actionDock")).position,
     actionButtonHeight:Math.round(document.querySelector("#btnRefresh").getBoundingClientRect().height),
-    mobileRowActionsDisplay:getComputedStyle(document.querySelector(".mobile-row-actions")).display,
+    summaryColumns:getComputedStyle(document.querySelector(".summary")).gridTemplateColumns.split(" ").length,
+    summaryVisibleItems:[...document.querySelectorAll(".sum-item")].filter(item=>{
+      const rect=item.getBoundingClientRect();
+      return rect.width>0 && rect.top>=0 && rect.bottom<=innerHeight;
+    }).length,
     operationColumnDisplay:getComputedStyle(document.querySelector("#fundTable th:last-child")).display,
+    operationCellButtons:document.querySelectorAll("#tbody tr:first-child td:last-child button[data-act]").length,
+    operationCellIndex:[...document.querySelector("#tbody tr:first-child").children].findIndex(cell=>cell.classList.contains("operation-cell")),
+    operationCellText:document.querySelector("#tbody tr:first-child td:last-child").textContent,
+    nameCellButtons:document.querySelectorAll("#tbody tr:first-child td:first-child button[data-act]").length,
     mainChartAreaHeight:Math.round(document.querySelector("#chartArea").getBoundingClientRect().height),
+    mainChartWrapHeight:Math.round(document.querySelector("#chartWrap").getBoundingClientRect().height),
+    mainChartCanvasHeight:document.querySelector("#chartCanvas").height,
+    mainChartVisible:document.querySelector("#chartHint").style.display==="none",
+    chartViewportIntersection:Math.max(0,Math.min(document.querySelector("#chartCanvas").getBoundingClientRect().bottom,document.querySelector("#actionDock").getBoundingClientRect().top)-Math.max(0,document.querySelector("#chartCanvas").getBoundingClientRect().top)),
     mainChartFontSize:chart.options.scales.x.ticks.font.size,
     dialogWidth:Math.round(document.querySelector("#dlgMarket").getBoundingClientRect().width),
     chartWidth:document.querySelector("#marketHistoryChart").width,
@@ -502,9 +534,18 @@ async function run() {
   assert.equal(mobile.bodyWidth, 390);
   assert.equal(mobile.actionDockPosition, "fixed");
   assert.ok(mobile.actionButtonHeight >= 50);
-  assert.equal(mobile.mobileRowActionsDisplay, "flex");
-  assert.equal(mobile.operationColumnDisplay, "none");
-  assert.ok(mobile.mainChartAreaHeight >= 400);
+  assert.equal(mobile.summaryColumns,3);
+  assert.equal(mobile.summaryVisibleItems,6);
+  assert.notEqual(mobile.operationColumnDisplay, "none");
+  assert.equal(mobile.operationCellButtons,4);
+  assert.equal(mobile.operationCellIndex,10);
+  assert.match(mobile.operationCellText.replace(/\s+/g,""),/買入.*管理.*比較/);
+  assert.equal(mobile.nameCellButtons,0);
+  assert.ok(mobile.mainChartAreaHeight >= 380);
+  assert.ok(mobile.mainChartWrapHeight >= 280);
+  assert.ok(mobile.mainChartCanvasHeight > 200);
+  assert.equal(mobile.mainChartVisible,true);
+  assert.ok(mobile.chartViewportIntersection >= 80);
   assert.ok(mobile.mainChartFontSize >= 13);
   assert.ok(mobile.dialogWidth <= 390);
   assert.ok(mobile.chartWidth > 300);
@@ -528,6 +569,8 @@ async function run() {
     ok: true,
     spawnedWorker,
     initial,
+    refreshResults,
+    refreshFeedback,
     comparison,
     comparisonBusinessDayPoints,
     fundSearch,

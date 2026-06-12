@@ -108,7 +108,7 @@ async function handleHealth(requestUrl, env) {
   const base = {
     status: "ok",
     service: "fund-tracker-market-api",
-    version: 4,
+    version: 5,
     cloudflareProxy: true,
     kvConfigured: Boolean(env.MARKET_CACHE),
     fallbackOrder: ["yahoo-query1", "yahoo-query2", "twse-for-taiwan", "cloudflare-kv-stale"],
@@ -231,7 +231,7 @@ async function enrichTwseNames(quotes) {
     const response = await fetch(TWSE_STOCK_DAILY_URL, {
       headers: {
         "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0 (compatible; FundTrackerMarketAPI/4.0)",
+        "User-Agent": "Mozilla/5.0 (compatible; FundTrackerMarketAPI/5.0)",
       },
       cf: { cacheEverything: true, cacheTtl: 300 },
     });
@@ -496,6 +496,7 @@ async function handleFundHistory(requestUrl, env) {
   const currency = String(requestUrl.searchParams.get("currency") || "").trim().toUpperCase();
   const start = String(requestUrl.searchParams.get("start") || "").trim();
   const end = String(requestUrl.searchParams.get("end") || "").trim();
+  const fresh = requestUrl.searchParams.get("fresh") === "1";
   if (!FUND_ID_PATTERN.test(secId)) throw new HttpError(400, "Invalid secId");
   if (currency && !CURRENCY_PATTERN.test(currency)) throw new HttpError(400, "Invalid currency");
   if (!DATE_PATTERN.test(start) || !DATE_PATTERN.test(end) || start > end) {
@@ -504,9 +505,16 @@ async function handleFundHistory(requestUrl, env) {
   const cacheKey = `fund-history:v3:${secId}:${currency || "native"}:${start}:${end}`;
 
   try {
-    const response = await fetch(buildMorningstarHistoryUrl(secId, currency, start, end), {
-      headers: upstreamJsonHeaders(),
-      cf: { cacheEverything: true, cacheTtl: 3600 },
+    const upstreamUrl = new URL(buildMorningstarHistoryUrl(secId, currency, start, end));
+    if (fresh) upstreamUrl.searchParams.set("_fresh", String(Date.now()));
+    const response = await fetch(upstreamUrl, {
+      headers: {
+        ...upstreamJsonHeaders(),
+        ...(fresh ? { "Cache-Control": "no-cache" } : {}),
+      },
+      cf: fresh
+        ? { cacheEverything: true, cacheTtl: 0 }
+        : { cacheEverything: true, cacheTtl: 3600 },
     });
     if (!response.ok) throw new Error(`Morningstar HTTP ${response.status}`);
     const payload = await response.json();
@@ -519,9 +527,14 @@ async function handleFundHistory(requestUrl, env) {
       source: "morningstar-via-cloudflare",
       stale: false,
       fetchedAt: new Date().toISOString(),
+      fresh,
     };
     await putCache(env, cacheKey, result);
-    return jsonResponse(result, 200, "public, max-age=300, s-maxage=3600");
+    return jsonResponse(
+      result,
+      200,
+      fresh ? "no-store" : "public, max-age=300, s-maxage=3600",
+    );
   } catch (error) {
     const cached = await getCache(env, cacheKey);
     if (cached?.history) {
@@ -529,6 +542,7 @@ async function handleFundHistory(requestUrl, env) {
         ...cached,
         source: `cloudflare-kv:${cached.source || "morningstar"}`,
         stale: true,
+        fresh: false,
       });
     }
     throw error;
@@ -617,7 +631,7 @@ async function fetchTwseQuote() {
   const response = await fetch(TWSE_INDEX_URL, {
     headers: {
       "Accept": "application/json",
-      "User-Agent": "Mozilla/5.0 (compatible; FundTrackerMarketAPI/4.0)",
+      "User-Agent": "Mozilla/5.0 (compatible; FundTrackerMarketAPI/5.0)",
     },
     cf: { cacheEverything: true, cacheTtl: 300 },
   });
@@ -649,7 +663,7 @@ async function fetchTwseHistory(range) {
   const response = await fetch(TWSE_HISTORY_URL, {
     headers: {
       "Accept": "application/json",
-      "User-Agent": "Mozilla/5.0 (compatible; FundTrackerMarketAPI/4.0)",
+      "User-Agent": "Mozilla/5.0 (compatible; FundTrackerMarketAPI/5.0)",
     },
     cf: { cacheEverything: true, cacheTtl: 3600 },
   });
@@ -693,7 +707,7 @@ async function fetchTwseStockQuote(symbol) {
   const response = await fetch(TWSE_STOCK_DAILY_URL, {
     headers: {
       "Accept": "application/json",
-      "User-Agent": "Mozilla/5.0 (compatible; FundTrackerMarketAPI/4.0)",
+      "User-Agent": "Mozilla/5.0 (compatible; FundTrackerMarketAPI/5.0)",
     },
     cf: { cacheEverything: true, cacheTtl: 300 },
   });
@@ -795,7 +809,7 @@ function yahooHeaders() {
   return {
     "Accept": "application/json",
     "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
-    "User-Agent": "Mozilla/5.0 (compatible; FundTrackerMarketAPI/4.0)",
+    "User-Agent": "Mozilla/5.0 (compatible; FundTrackerMarketAPI/5.0)",
   };
 }
 
@@ -803,7 +817,7 @@ function upstreamJsonHeaders() {
   return {
     "Accept": "application/json",
     "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
-    "User-Agent": "Mozilla/5.0 (compatible; FundTrackerAPI/4.0)",
+    "User-Agent": "Mozilla/5.0 (compatible; FundTrackerAPI/5.0)",
   };
 }
 

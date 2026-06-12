@@ -85,7 +85,7 @@ async function run() {
   const health = await request("/health?deep=1");
   assert.equal(health.response.status, 200);
   assert.equal(health.body.status, "ok");
-  assert.equal(health.body.version, 4);
+  assert.equal(health.body.version, 5);
   assert.equal(health.body.cloudflareProxy, true);
   assert.equal(health.body.kvConfigured, true);
   assert.ok(health.body.checks.length >= 7);
@@ -127,6 +127,13 @@ async function run() {
   assert.equal(fundHistory.response.status, 200);
   assert.ok(fundHistory.body.history.length > 20);
   assert.ok(fundHistory.body.history.every((point) => Array.isArray(point) && point[1] > 0));
+
+  const freshFundHistory = await request("/api/funds/history?secId=F0HKG05X2C&currency=TWD&start=2026-06-01&end=2026-06-12&fresh=1");
+  assert.equal(freshFundHistory.response.status, 200);
+  assert.equal(freshFundHistory.body.fresh, true);
+  assert.equal(freshFundHistory.body.stale, false);
+  assert.equal(freshFundHistory.response.headers.get("cache-control"), "no-store");
+  assert.ok(freshFundHistory.body.history.at(-1)[0] >= fundHistory.body.history.at(-1)[0]);
 
   const tdcc = await request("/api/funds/tdcc?isin=LU0820562030", { timeoutMs: 90000 });
   assert.equal(tdcc.response.status, 200);
@@ -178,6 +185,7 @@ async function run() {
     fund: {
       searchRows: fundSearch.body.rows.length,
       historyPoints: fundHistory.body.history.length,
+      freshLatestDate: new Date(freshFundHistory.body.history.at(-1)[0]).toISOString().slice(0, 10),
       tdccDate: tdcc.body.latest.date,
     },
   }, null, 2));

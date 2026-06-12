@@ -60,7 +60,7 @@ tbody tr.sel{background:var(--sel)}
 .unitsCell{text-decoration:underline dotted;text-underline-offset:3px}
 .rowBtns{display:inline-flex;gap:4px}
 .rowBtns button{border:1px solid var(--border);background:var(--panel2);color:var(--text);border-radius:5px;font-size:12px;padding:5px 8px;min-height:30px}
-.mobile-row-actions{display:none}
+.operation-cell{min-width:224px}
 .current-price{display:block;font-size:17px;font-weight:800;line-height:1.2}
 .price-meta{display:block;font-size:11px;color:var(--muted);margin-top:3px;font-weight:500}
 .session-label{display:inline-block;border-radius:999px;padding:1px 6px;font-size:10px;font-weight:700;background:var(--panel2);color:var(--muted)}
@@ -121,7 +121,7 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
 .st-ok{color:var(--up)} .st-dup{color:var(--muted)} .st-err{color:var(--down)}
 .totRow{font-weight:700}
 .badge{font-size:10px;border-radius:4px;padding:1px 5px;color:#fff;display:inline-block}
-.badge.RSP{background:var(--rsp)} .badge.LUMP{background:var(--lump)}
+.badge.RSP{background:var(--rsp)} .badge.LUMP{background:var(--lump)} .badge.FUND{background:#7c3aed}
 .note{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.5}
 #toast{position:fixed;bottom:46px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:8px 18px;border-radius:20px;font-size:13px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:99;max-width:90vw}
 #toast.show{opacity:.93}
@@ -156,32 +156,30 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
   .action-dock{position:fixed;left:0;right:0;bottom:0;z-index:50;display:grid;grid-template-columns:repeat(5,1fr);gap:4px;padding:7px max(7px,env(safe-area-inset-right)) calc(7px + env(safe-area-inset-bottom)) max(7px,env(safe-area-inset-left));background:color-mix(in srgb,var(--panel) 94%,transparent);border-top:1px solid var(--border);box-shadow:0 -5px 18px rgba(0,0,0,.12);backdrop-filter:blur(10px)}
   .action-dock .btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:5px 2px;min-width:0;min-height:52px;font-size:17px}
   .action-dock .btn-label{display:block;margin:0;font-size:10px;line-height:1.1}
-  .summary{gap:12px;flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;scrollbar-width:none}
-  .summary::-webkit-scrollbar{display:none}
-  .sum-item{min-width:116px}
-  .sum-item .lbl{font-size:12px}
-  .sum-item .val{font-size:17px}
-  #updStatus{min-width:120px;margin-left:0}
+  .summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 10px;overflow:visible;padding-bottom:2px}
+  .sum-item{min-width:0}
+  .sum-item .lbl{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sum-item .val{font-size:15px;white-space:nowrap}
+  #updStatus{grid-column:1/-1;min-width:0;margin-left:0;font-size:11px}
   #marketBar{min-height:82px}
   #marketBarTools{padding:8px;max-width:112px;white-space:normal}
   .market-item{min-width:126px}
-  #tableWrap{flex:none;min-height:250px;max-height:43vh}
+  #tableWrap{flex:none;min-height:210px;max-height:34vh}
   thead th,tbody td{padding:8px 7px;font-size:13px}
   thead th:first-child,tbody td:first-child{position:sticky;left:0;z-index:1;background:var(--panel)}
   thead th:first-child{z-index:3;background:var(--panel2)}
   tbody tr.sel td:first-child{background:var(--sel)}
   .current-price{font-size:18px}
-  .mobile-row-actions{display:flex;gap:5px;margin-top:7px}
-  .mobile-row-actions button{font-size:12px;min-height:36px;padding:6px 9px}
-  #fundTable th:last-child,#fundTable td:last-child{display:none}
-  #chartArea{flex:none;min-height:430px;height:52vh}
+  .operation-cell{min-width:228px}
+  .operation-cell .rowBtns button{font-size:12px;min-height:36px;padding:6px 9px}
+  #chartArea{flex:none;min-height:390px;height:48vh;scroll-margin-top:8px}
   #chartBar{display:grid;grid-template-columns:1fr auto auto;align-items:center;padding:9px 10px;gap:7px}
-  #chartTitle{grid-column:1/-1;max-width:100%;font-size:16px}
+  #chartTitle{grid-column:1;grid-row:1;max-width:100%;font-size:16px}
   #rangeTabs{grid-column:1/-1;grid-row:2;display:flex;flex-wrap:nowrap;overflow-x:auto;padding-bottom:3px;scrollbar-width:thin}
   .tab{font-size:14px;min-height:40px;padding:8px 11px}
-  #btnPortfolio{grid-column:2;grid-row:3}
-  #modeToggle{grid-column:3;grid-row:3}
-  #chartWrap{min-height:330px;padding:6px 6px 4px}
+  #btnPortfolio{grid-column:2;grid-row:1}
+  #modeToggle{grid-column:3;grid-row:1}
+  #chartWrap{min-height:285px;padding:6px 6px 4px}
   #chartCanvas{inset:6px 6px 4px}
   #statusBar{font-size:13px;padding:7px 10px}
   #toast{bottom:86px;font-size:14px}
@@ -201,7 +199,7 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
     <div class="action-dock" id="actionDock">
       <button class="btn primary" id="btnAdd" title="新增基金">＋<span class="btn-label">基金</span></button>
       <button class="btn primary" id="btnAddStock" title="新增股票或 ETF">＋<span class="btn-label">股票</span></button>
-      <button class="btn" id="btnRefresh" title="更新全部持倉">⟳<span class="btn-label">持倉更新</span></button>
+      <button class="btn" id="btnRefresh" title="依 API 最新資料更新基金淨值與股票價格">⟳<span class="btn-label">更新淨值</span></button>
       <button class="btn" id="btnMarketRefresh" title="更新全球股市">⟳<span class="btn-label">股市更新</span></button>
       <button class="btn" id="btnCompare" title="比較庫存基金與全球市場">↗<span class="btn-label">比較</span></button>
     </div>
@@ -492,7 +490,7 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
 
 <input type="file" id="csvFile" accept=".csv,text/csv" hidden>
 <input type="file" id="importFile" accept=".json,application/json" hidden>
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script>
 "use strict";
@@ -645,19 +643,38 @@ function mapMorningstarRows(rows){
 }
 
 // 淨值歷史（Morningstar timeseries, 計價幣別）
-async function msHistory(secId, startDate, endDate, currencyId){
+async function msHistoryResult(secId, startDate, endDate, currencyId, options={}){
+  const fresh = options.fresh===true;
+  const freshQuery = fresh ? `&fresh=1&_=${Date.now()}` : "";
   try{
-    const payload = await marketFetch(`/api/funds/history?secId=${encodeURIComponent(secId)}&currency=${encodeURIComponent(currencyId||"")}&start=${startDate}&end=${endDate}`, 30000);
+    const payload = await marketFetch(`/api/funds/history?secId=${encodeURIComponent(secId)}&currency=${encodeURIComponent(currencyId||"")}&start=${startDate}&end=${endDate}${freshQuery}`, 30000);
     apiDiagnostics.fundHistory = payload.source||"cloudflare";
-    return normalizeMorningstarHistory(payload.history);
+    return {
+      history:normalizeMorningstarHistory(payload.history),
+      source:payload.source||"cloudflare",
+      stale:payload.stale===true,
+      fetchedAt:payload.fetchedAt||null,
+      fresh:payload.fresh===true
+    };
   }catch(proxyError){
     console.warn("基金歷史代理失敗，改用 Morningstar 直連", proxyError);
   }
   const id = `${secId}]2]0]${UNIVERSE}`;
-  const url = `${MS_BASE}/timeseries_price/${MS_TOKEN}?id=${encodeURIComponent(id)}&currencyId=${encodeURIComponent(currencyId||"")}&idtype=Morningstar&frequency=daily&startDate=${startDate}&endDate=${endDate}&outputType=COMPACTJSON`;
+  const bust = fresh ? `&_=${Date.now()}` : "";
+  const url = `${MS_BASE}/timeseries_price/${MS_TOKEN}?id=${encodeURIComponent(id)}&currencyId=${encodeURIComponent(currencyId||"")}&idtype=Morningstar&frequency=daily&startDate=${startDate}&endDate=${endDate}&outputType=COMPACTJSON${bust}`;
   const j = await (await fetchT(url, 25000)).json();
   apiDiagnostics.fundHistory = "morningstar-direct";
-  return normalizeMorningstarHistory(j);
+  return {
+    history:normalizeMorningstarHistory(j),
+    source:"morningstar-direct",
+    stale:false,
+    fetchedAt:new Date().toISOString(),
+    fresh
+  };
+}
+
+async function msHistory(secId, startDate, endDate, currencyId){
+  return (await msHistoryResult(secId,startDate,endDate,currencyId)).history;
 }
 
 function normalizeMorningstarHistory(payload){
@@ -1201,59 +1218,124 @@ function applyRspPlans(){
 
 /* ---------------- 更新流程 ---------------- */
 let updating = false;
-async function updateFund(h, full){
+function latestCachePoint(h){
+  return getCache(h).navHistory.at(-1)||null;
+}
+
+function updateResult(h,before,ok,meta={}){
+  const after = latestCachePoint(h);
+  return {
+    holdingId:h.id,
+    name:h.fundName,
+    assetType:h.assetType,
+    ok,
+    beforeDate:before?.date||null,
+    latestDate:after?.date||null,
+    changed:Boolean(ok && after && (
+      after.date!==(before?.date||null) || after.nav!==(before?.nav??null)
+    )),
+    source:meta.source||getCache(h).source||null,
+    stale:meta.stale===true,
+    fetchedAt:meta.fetchedAt||null
+  };
+}
+
+async function updateFund(h, options={}){
+  const opts = typeof options==="boolean" ? {full:options} : (options||{});
   const c = getCache(h);
+  const before = c.navHistory.at(-1)||null;
   let start;
-  if(full || !c.navHistory.length){
+  if(opts.full || !c.navHistory.length){
     start = addDays(todayStr(), -MAX_HIST);
   }else{
     start = addDays(c.navHistory[c.navHistory.length-1].date, -7);
   }
   let ok = false;
+  let meta = {};
   if(h.assetType==="stock"){
     try{
       const result = await stockHistory(h.symbol||h.fundCode,"10y");
       mergeHistory(h,result.history,result.source);
+      meta = {source:result.source,fetchedAt:new Date().toISOString()};
       ok = true;
     }catch(error){
       console.error(`股票歷史更新失敗：${h.fundName}`,error);
     }
     if(h.currency!=="TWD") await ensureFx(h);
-    return ok;
+    return updateResult(h,before,ok,meta);
   }
   try{
-    const list = await msHistory(h.fundCode, start, todayStr(), h.currency);
-    if(list.length){ mergeHistory(h, list, apiDiagnostics.fundHistory); ok = true; }
+    const result = await msHistoryResult(h.fundCode,start,todayStr(),h.currency,{fresh:opts.fresh===true});
+    meta = result;
+    if(result.history.length){
+      mergeHistory(h,result.history,result.source);
+      ok = true;
+    }
   }catch(e){ console.error(`基金歷史更新失敗：${h.fundName}`, e); }
   if(!ok){ // TDCC 備援（境外）
     const t = await tdccOffshoreNav(h.isin);
-    if(t && t.nav){ mergeHistory(h, [t], apiDiagnostics.tdcc); ok = true; }
+    if(t && t.nav){
+      mergeHistory(h,[t],apiDiagnostics.tdcc);
+      meta = {source:apiDiagnostics.tdcc,fetchedAt:new Date().toISOString()};
+      ok = true;
+    }
   }
   if(h.currency!=="TWD") await ensureFx(h);
-  return ok;
+  return updateResult(h,before,ok,meta);
 }
 
-async function updateAll(force){
+function fundDateRange(results){
+  const dates = results
+    .filter(result=>result.assetType==="fund" && result.ok && result.latestDate)
+    .map(result=>result.latestDate)
+    .sort();
+  if(!dates.length) return "";
+  const short = date=>date.slice(5).replace("-","/");
+  return dates[0]===dates.at(-1) ? short(dates[0]) : `${short(dates[0])}～${short(dates.at(-1))}`;
+}
+
+async function updateAll(options={}){
+  const opts = typeof options==="boolean" ? {fresh:options} : (options||{});
   if(updating || !holdings.length) return;
   updating = true;
   const st = $("#updStatus");
   $("#btnRefresh").disabled = true;
-  let okCnt = 0, failCnt = 0;
+  const results = [];
   for(let i=0;i<holdings.length;i++){
     st.innerHTML = `<span class="spin"></span> 更新中 ${i+1}/${holdings.length}…`;
-    const ok = await updateFund(holdings[i], force);
-    ok ? okCnt++ : failCnt++;
+    try{
+      results.push(await updateFund(holdings[i],{fresh:opts.fresh===true}));
+    }catch(error){
+      console.error(`持倉更新發生未預期錯誤：${holdings[i].fundName}`,error);
+      results.push(updateResult(holdings[i],latestCachePoint(holdings[i]),false,{source:"unexpected-error"}));
+    }
     renderAll(false);
     if(holdings.length>10 && i<holdings.length-1) await new Promise(r=>setTimeout(r,500));
   }
-  settings._lastRefresh = new Date().toISOString();
+  const now = new Date();
+  const changedCnt = results.filter(result=>result.changed).length;
+  const failCnt = results.filter(result=>!result.ok).length;
+  const staleCnt = results.filter(result=>result.stale).length;
+  const dateRange = fundDateRange(results);
+  settings._lastRefreshAttempt = now.toISOString();
+  settings._lastRefresh = settings._lastRefreshAttempt;
+  if(changedCnt) settings._lastDataRefresh = settings._lastRefreshAttempt;
+  settings._lastFundDateRange = dateRange;
   lsSet(LS_S, settings);
   updating = false;
   $("#btnRefresh").disabled = false;
-  st.textContent = "更新於 " + new Date().toLocaleTimeString("zh-TW",{hour12:false});
-  if(failCnt) toast(`⚠ ${failCnt} 筆持倉更新失敗，已使用快取資料`);
+  const timeText = now.toLocaleTimeString("zh-TW",{hour:"2-digit",minute:"2-digit",hour12:false});
+  st.textContent = `${dateRange?`基金淨值 ${dateRange} · `:""}查詢 ${timeText}`;
+  if(failCnt){
+    toast(`⚠ ${failCnt} 筆查詢失敗；${changedCnt} 筆取得新資料${dateRange?`，API 淨值日 ${dateRange}`:""}`,4200);
+  }else if(changedCnt){
+    toast(`已更新 ${changedCnt} 筆資料${dateRange?`；API 淨值日 ${dateRange}`:""}`,3600);
+  }else{
+    toast(`API 查詢完成，目前沒有新資料${dateRange?`；最新淨值日 ${dateRange}`:""}${staleCnt?`（${staleCnt} 筆使用備援快取）`:""}`,4200);
+  }
   applyRspPlans();
   renderAll(true);
+  return results;
 }
 
 /* ---------------- 計算 ---------------- */
@@ -1401,14 +1483,11 @@ function renderTable(){
   tb.innerHTML = rows.map(d=>{
     const sel = d.h.id===selectedId?" class=\"sel\"":"";
     const dayTxt = d.dayChg!=null ? `<span class="${clsOf(d.dayChg)}">${signed(d.dayChg, d.nav>=100?2:4)}<br><span class="subTxt ${clsOf(d.dayChg)}">${signed(d.dayChgPct,2,"%")}</span></span>` : "—";
-    const mobileActions = `<span class="rowBtns mobile-row-actions">
-      <button data-act="buy" data-id="${d.h.id}">＋買入</button>
-      <button data-act="mng" data-id="${d.h.id}">管理</button>
-      <button data-act="cmp" data-id="${d.h.id}">比較</button>
-      <button data-act="del" data-id="${d.h.id}" title="刪除持倉">刪除</button>
-    </span>`;
+    const assetBadge = d.h.assetType==="stock"
+      ? '<span class="badge LUMP">股票</span> '
+      : '<span class="badge FUND">基金</span> ';
     return `<tr data-id="${d.h.id}"${sel}>
-      <td title="${esc(d.h.fundName)}">${d.h.assetType==="stock"?'<span class="badge LUMP">股票</span> ':""}${esc(d.h.fundName)}<br><span class="subTxt">${esc(d.h.currency)}${d.h.assetType==="stock"&&d.h.symbol?" · "+esc(d.h.symbol):(d.h.isin?" · "+esc(d.h.isin):"")}</span>${mobileActions}</td>
+      <td title="${esc(d.h.fundName)}">${assetBadge}${esc(d.h.fundName)}<br><span class="subTxt">${esc(d.h.currency)}${d.h.assetType==="stock"&&d.h.symbol?" · "+esc(d.h.symbol):(d.h.isin?" · "+esc(d.h.isin):"")}</span></td>
       <td><span class="current-price">${fmtN(d.nav, d.nav!=null&&d.nav>=100?2:4)}</span>${holdingPriceMetaHtml(d.h,d.navDate)}</td>
       <td>${dayTxt}</td>
       <td class="unitsCell" title="點擊管理買入記錄">${fmtN(d.units,2)}</td>
@@ -1418,7 +1497,7 @@ function renderTable(){
       <td>${d.div>0?fmtN(d.div,0):"—"}</td>
       <td class="${clsOf(d.plPct??0)}">${d.plPct!=null?signed(d.plPct,2,"%"):"—"}</td>
       <td class="${clsOf(d.rangePct??0)}">${d.rangePct!=null?signed(d.rangePct,2,"%"):"—"}</td>
-      <td><span class="rowBtns">
+      <td class="operation-cell"><span class="rowBtns">
         <button data-act="buy" data-id="${d.h.id}" title="新增買入">＋買入</button>
         <button data-act="mng" data-id="${d.h.id}" title="管理買入記錄">管理</button>
         <button data-act="cmp" data-id="${d.h.id}" title="與其他基金或市場比較">比較</button>
@@ -1881,7 +1960,7 @@ async function confirmStock(){
   $("#dlgStock").close();
   renderAll();
   toast(`已加入 ${pickedStock.symbol} · ${fmtN(shares,4)} 股`);
-  await updateFund(h,true);
+  await updateFund(h,{full:true,fresh:true});
   renderAll();
 }
 
@@ -2424,7 +2503,7 @@ function frExportCsv(){
 /* ---------------- 事件 ---------------- */
 $("#btnAdd").onclick = openAdd;
 $("#btnAddStock").onclick = openStock;
-$("#btnRefresh").onclick = ()=>updateAll(false);
+$("#btnRefresh").onclick = ()=>updateAll({fresh:true});
 $("#btnMarketRefresh").onclick = ()=>loadMarketQuotes(true);
 $("#btnCompare").onclick = ()=>openMarketDialog();
 $("#btnExport").onclick = doExport;
@@ -2738,11 +2817,23 @@ window.addEventListener("resize", ()=>{ if(chart) chart.resize(); if(marketChart
   renderMarketBar();
   loadMarketQuotes(false);
   applyRspPlans();   // 用快取淨值先補；更新完成後會再補一次
-  const last = settings._lastRefresh ? new Date(settings._lastRefresh) : null;
-  if(last) $("#updStatus").textContent = "上次更新 " + last.toLocaleString("zh-TW",{hour12:false});
+  const last = settings._lastRefreshAttempt ? new Date(settings._lastRefreshAttempt) : (settings._lastRefresh?new Date(settings._lastRefresh):null);
+  const cachedDates = holdings
+    .filter(h=>h.assetType==="fund")
+    .map(h=>latestCachePoint(h)?.date)
+    .filter(Boolean)
+    .sort();
+  const cachedRange = cachedDates.length
+    ? (cachedDates[0]===cachedDates.at(-1)
+      ? cachedDates[0].slice(5).replace("-","/")
+      : `${cachedDates[0].slice(5).replace("-","/")}～${cachedDates.at(-1).slice(5).replace("-","/")}`)
+    : "";
+  if(last) $("#updStatus").textContent = `${cachedRange?`基金淨值 ${cachedRange} · `:""}上次查詢 ${last.toLocaleString("zh-TW",{hour:"2-digit",minute:"2-digit",hour12:false})}`;
   if(settings.refreshOnOpen!==false && holdings.length){
-    const stale = !last || (Date.now()-last.getTime() > 6*3600*1000);
-    if(stale) updateAll(false);
+    const hasPendingFund = cachedDates.some(date=>date<todayStr());
+    const retryMs = hasPendingFund ? 60*60*1000 : 6*60*60*1000;
+    const stale = !last || (Date.now()-last.getTime()>retryMs);
+    if(stale) updateAll({fresh:hasPendingFund});
   }
 })();
 </script>
