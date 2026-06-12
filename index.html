@@ -115,6 +115,22 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
 #toast.show{opacity:.93}
 .spin{display:inline-block;width:12px;height:12px;border:2px solid var(--muted);border-top-color:transparent;border-radius:50%;animation:sp 0.8s linear infinite;vertical-align:-2px}
 @keyframes sp{to{transform:rotate(360deg)}}
+/* ===== 全球市場 ===== */
+#marketBar{flex:none;display:flex;align-items:stretch;overflow-x:auto;background:var(--panel);border-bottom:1px solid var(--border);scrollbar-width:thin}
+.market-item{min-width:108px;padding:6px 10px;border:0;border-right:1px solid var(--border);background:transparent;color:var(--text);text-align:left}
+.market-item:hover{background:var(--hover)}
+.market-name{display:block;font-size:10px;color:var(--muted);font-weight:600}
+.market-price{display:block;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
+.market-change{display:block;font-size:11px;font-variant-numeric:tabular-nums}
+#marketBarTools{display:flex;align-items:center;gap:6px;padding:5px 8px;min-width:max-content}
+#marketStatus{font-size:10px;color:var(--muted)}
+#dlgMarket{width:min(920px,96vw);max-width:920px}
+#marketPicker{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.market-pick{display:flex;align-items:center;gap:5px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--panel2);font-size:12px;cursor:pointer}
+.market-pick:has(input:checked){border-color:var(--accent);background:var(--sel)}
+#marketHistoryWrap{height:min(430px,52vh);position:relative;border:1px solid var(--border);border-radius:8px;padding:6px}
+#marketHistoryChart{position:absolute;inset:6px}
+#marketHistoryStatus{min-height:20px;margin:7px 0;font-size:12px;color:var(--muted)}
 /* mobile */
 @media (max-width:640px){
   body{font-size:13px}
@@ -151,6 +167,13 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
     <span id="updStatus"></span>
   </div>
 </header>
+
+<div id="marketBar" aria-label="全球市場">
+  <div id="marketBarTools">
+    <span id="marketStatus">載入全球市場…</span>
+    <button class="btn" id="btnMarketRefresh" title="重新整理全球市場">⟳</button>
+  </div>
+</div>
 
 <div id="tableWrap">
   <table id="fundTable">
@@ -356,6 +379,24 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
   </div>
 </dialog>
 
+<!-- ===== 全球市場歷史比較 Dialog ===== -->
+<dialog id="dlgMarket">
+  <div class="dlgHead"><span>全球市場歷史比較</span><button class="xBtn" data-close="dlgMarket">✕</button></div>
+  <div class="dlgBody">
+    <div class="note" style="margin:0 0 8px">選擇 1 至 4 個市場；走勢以區間第一筆資料為 0%，方便比較相對漲跌。</div>
+    <div id="marketPicker"></div>
+    <div class="tabs" id="marketRanges"></div>
+    <div id="marketHistoryStatus"></div>
+    <div id="marketHistoryWrap">
+      <canvas id="marketHistoryChart"></canvas>
+    </div>
+  </div>
+  <div class="dlgFoot">
+    <button class="btn" id="btnMarketHistoryRefresh">重新抓取</button>
+    <button class="btn primary" data-close="dlgMarket">關閉</button>
+  </div>
+</dialog>
+
 <input type="file" id="csvFile" accept=".csv,text/csv" hidden>
 <input type="file" id="importFile" accept=".json,application/json" hidden>
 <div id="toast"></div>
@@ -363,13 +404,15 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
 <script>
 "use strict";
 /* ================================================================
-   基金追蹤 — 單檔 PWA（v1.1）
-   資料來源（已驗證 2026-06-11，CORS 全開放，免金鑰）：
+   基金追蹤 — 單檔 PWA（v1.2）
+   資料來源：
    1. Morningstar screener  : 基金搜尋 + 最新淨值（境內外台灣核備基金）
    2. Morningstar timeseries: 每日淨值歷史（約 10 年）
    3. TDCC OpenAPI 3-4      : 境外基金淨值（備援）
+   4. Yahoo Finance v8      : 全球市場報價與歷史（經受限 Cloudflare Worker）
    v1.1 新增：金額買入(含手續費)、定期定額排程自動補記錄、
               配息記錄與含息報酬、投資組合走勢圖、XIRR 年化、CSV 批次匯入
+   v1.2 新增：全球市場報價列、最多四市場歷史報酬比較
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
@@ -381,6 +424,31 @@ const LS_S = "fund_tracker_settings";
 const LS_FX = "fund_tracker_fx";
 const NAV_PREFIX = "fund_tracker_nav_cache_";
 const MAX_HIST = 3650; // 約 10 年
+const MARKET_API = "https://fund-tracker-proxy.fund-tracker-proxy.workers.dev";
+const LS_MARKET_CACHE = "fund_tracker_market_cache_v2";
+const MARKET_INDICES = [
+  {symbol:"^TWII", name:"台灣加權"},
+  {symbol:"^TWOII", name:"櫃買"},
+  {symbol:"^GSPC", name:"S&P 500"},
+  {symbol:"^IXIC", name:"NASDAQ"},
+  {symbol:"^DJI", name:"道瓊"},
+  {symbol:"^SOX", name:"費城半導體"},
+  {symbol:"^N225", name:"日經 225"},
+  {symbol:"^HSI", name:"恒生"},
+  {symbol:"000001.SS", name:"上證"},
+  {symbol:"^FTSE", name:"FTSE 100"},
+  {symbol:"^GDAXI", name:"德國 DAX"},
+  {symbol:"^FCHI", name:"法國 CAC 40"},
+  {symbol:"^KS11", name:"韓國 KOSPI"},
+  {symbol:"^NSEI", name:"印度 Nifty 50"},
+  {symbol:"^STI", name:"新加坡 STI"},
+  {symbol:"^VIX", name:"VIX"}
+];
+const MARKET_RANGES = [
+  ["1月","1mo"],["3月","3mo"],["6月","6mo"],["1年","1y"],
+  ["2年","2y"],["5年","5y"],["10年","10y"]
+];
+const MARKET_COLORS = ["#2563eb","#f59e0b","#16a34a","#dc2626"];
 
 const $ = s => document.querySelector(s);
 const fmtN = (n, d=2) => (n==null||isNaN(n)) ? "—" : n.toLocaleString("zh-TW",{minimumFractionDigits:d,maximumFractionDigits:d});
@@ -417,6 +485,12 @@ let customRange = null;            // {start,end}
 let chartMode = "pct";             // pct | nav
 let sortKey = null, sortAsc = true;
 let chart = null;
+let marketChart = null;
+let marketCache = lsGet(LS_MARKET_CACHE, {quotes:{}, fetchedAt:null});
+let marketSelection = Array.isArray(settings.marketSymbols) ? settings.marketSymbols.slice(0,4) : ["^TWII","^GSPC","^IXIC"];
+let marketRange = MARKET_RANGES.some(([,value])=>value===settings.marketRange) ? settings.marketRange : "1y";
+let marketHistoryCache = new Map();
+let marketLoading = false;
 let picked = null;                 // 搜尋選中的基金
 let mngHoldingId = null, editPurId = null, editDivId = null;
 let chartView = "fund";            // fund | portfolio
@@ -466,6 +540,207 @@ async function tdccOffshoreNav(isin){
     const d = String(last["日期"]);
     return {date:`${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`, nav:parseFloat(last["基金淨值(金額)"])};
   }catch(e){ return null; }
+}
+
+/* ---------------- 全球市場（Yahoo Finance via Cloudflare Worker） ---------------- */
+function marketMeta(symbol){
+  return MARKET_INDICES.find(item=>item.symbol===symbol) || {symbol, name:symbol};
+}
+
+async function marketFetch(path, ms=25000){
+  const response = await fetchT(MARKET_API + path, ms);
+  const payload = await response.json();
+  if(payload?.error) throw new Error(payload.error);
+  return payload;
+}
+
+function marketPriceText(value){
+  if(!Number.isFinite(value)) return "—";
+  const digits = Math.abs(value)>=1000 ? 0 : Math.abs(value)>=10 ? 2 : 4;
+  return fmtN(value, digits);
+}
+
+function renderMarketBar(message=""){
+  const quotes = marketCache?.quotes || {};
+  const cards = MARKET_INDICES.map(item=>{
+    const quote = quotes[item.symbol];
+    if(!quote || !Number.isFinite(quote.price)){
+      return `<button class="market-item" data-market-symbol="${esc(item.symbol)}" title="查看 ${esc(item.name)} 歷史走勢">
+        <span class="market-name">${esc(item.name)}</span>
+        <span class="market-price flat">—</span>
+        <span class="market-change flat">—</span>
+      </button>`;
+    }
+    const change = Number.isFinite(quote.previousClose) ? quote.price-quote.previousClose : null;
+    const pct = Number.isFinite(change) && quote.previousClose ? change/quote.previousClose*100 : null;
+    const cls = Number.isFinite(change) ? clsOf(change) : "flat";
+    return `<button class="market-item" data-market-symbol="${esc(item.symbol)}" title="查看 ${esc(item.name)} 歷史走勢">
+      <span class="market-name">${esc(item.name)}</span>
+      <span class="market-price ${cls}">${marketPriceText(quote.price)}</span>
+      <span class="market-change ${cls}">${Number.isFinite(pct)?signed(pct,2,"%"):"—"}</span>
+    </button>`;
+  }).join("");
+  const fetched = marketCache?.fetchedAt ? new Date(marketCache.fetchedAt) : null;
+  const status = message || (fetched && !isNaN(fetched)
+    ? "Yahoo · " + fetched.toLocaleTimeString("zh-TW",{hour:"2-digit",minute:"2-digit",hour12:false})
+    : "尚未更新");
+  $("#marketBar").innerHTML = cards + `<div id="marketBarTools">
+    <span id="marketStatus">${esc(status)}</span>
+    <button class="btn" id="btnMarketRefresh" title="重新整理全球市場">⟳</button>
+  </div>`;
+}
+
+async function loadMarketQuotes(force=false){
+  if(marketLoading) return;
+  const fetched = marketCache?.fetchedAt ? new Date(marketCache.fetchedAt).getTime() : 0;
+  if(!force && fetched && Date.now()-fetched<15*60*1000){
+    renderMarketBar();
+    return;
+  }
+
+  marketLoading = true;
+  renderMarketBar("更新中…");
+  try{
+    const symbols = MARKET_INDICES.map(item=>item.symbol).join(",");
+    const payload = await marketFetch(`/api/yahoo/quotes?symbols=${encodeURIComponent(symbols)}`);
+    const nextQuotes = {...(marketCache?.quotes||{})};
+    let successCount = 0;
+    (payload.quotes||[]).forEach(quote=>{
+      if(!quote?.error && Number.isFinite(quote.price)){
+        nextQuotes[quote.symbol] = quote;
+        successCount++;
+      }
+    });
+    if(!successCount) throw new Error("所有市場報價皆無資料");
+    marketCache = {quotes:nextQuotes, fetchedAt:payload.fetchedAt||new Date().toISOString()};
+    lsSet(LS_MARKET_CACHE, marketCache);
+    renderMarketBar(successCount<MARKET_INDICES.length ? `部分更新 ${successCount}/${MARKET_INDICES.length}` : "");
+  }catch(error){
+    console.error("全球市場更新失敗", error);
+    renderMarketBar("更新失敗，顯示快取");
+  }finally{
+    marketLoading = false;
+  }
+}
+
+function parseMarketHistory(payload){
+  const result = payload?.chart?.result?.[0];
+  if(!result) throw new Error(payload?.chart?.error?.description||"查無歷史資料");
+  const timestamps = result.timestamp||[];
+  const adjusted = result.indicators?.adjclose?.[0]?.adjclose;
+  const closes = adjusted||result.indicators?.quote?.[0]?.close||[];
+  return timestamps.map((timestamp,index)=>({
+    date:new Date(timestamp*1000).toISOString().slice(0,10),
+    value:closes[index]
+  })).filter(item=>Number.isFinite(item.value));
+}
+
+async function fetchMarketHistory(symbol, range, force=false){
+  const interval = range==="10y" ? "1wk" : "1d";
+  const cacheKey = `${symbol}|${range}|${interval}`;
+  if(!force && marketHistoryCache.has(cacheKey)) return marketHistoryCache.get(cacheKey);
+  const payload = await marketFetch(`/api/yahoo/chart?symbol=${encodeURIComponent(symbol)}&range=${range}&interval=${interval}`, 30000);
+  const history = parseMarketHistory(payload);
+  if(history.length<2) throw new Error(`${symbol} 歷史資料不足`);
+  marketHistoryCache.set(cacheKey, history);
+  return history;
+}
+
+function persistMarketSettings(){
+  settings.marketSymbols = marketSelection.slice();
+  settings.marketRange = marketRange;
+  lsSet(LS_S, settings);
+}
+
+function renderMarketControls(){
+  $("#marketPicker").innerHTML = MARKET_INDICES.map(item=>`<label class="market-pick">
+    <input type="checkbox" data-market-pick="${esc(item.symbol)}" ${marketSelection.includes(item.symbol)?"checked":""}>
+    ${esc(item.name)}
+  </label>`).join("");
+  $("#marketRanges").innerHTML = MARKET_RANGES.map(([label,value])=>
+    `<button class="tab${marketRange===value?" on":""}" data-market-range="${value}">${label}</button>`
+  ).join("");
+}
+
+function renderMarketHistoryChart(series){
+  if(marketChart){ marketChart.destroy(); marketChart=null; }
+  if(!series.length) return;
+
+  const dates = [...new Set(series.flatMap(item=>item.history.map(point=>point.date)))].sort();
+  const gridColor = getComputedStyle(document.body).getPropertyValue("--border").trim();
+  const textColor = getComputedStyle(document.body).getPropertyValue("--muted").trim();
+  const datasets = series.map((item,index)=>{
+    const first = item.history.find(point=>Number.isFinite(point.value))?.value;
+    const valueByDate = new Map(item.history.map(point=>[point.date,point.value]));
+    return {
+      label:marketMeta(item.symbol).name,
+      data:dates.map(date=>{
+        const value = valueByDate.get(date);
+        return Number.isFinite(value) && first ? (value/first-1)*100 : null;
+      }),
+      borderColor:MARKET_COLORS[index],
+      backgroundColor:MARKET_COLORS[index],
+      borderWidth:1.8,
+      pointRadius:0,
+      pointHoverRadius:3,
+      tension:0,
+      spanGaps:true,
+      fill:false
+    };
+  });
+
+  marketChart = new Chart($("#marketHistoryChart"), {
+    type:"line",
+    data:{labels:dates,datasets},
+    options:{
+      responsive:true,
+      maintainAspectRatio:false,
+      animation:false,
+      interaction:{mode:"index",intersect:false},
+      plugins:{
+        legend:{display:true,labels:{color:textColor,boxWidth:14,font:{size:11}}},
+        tooltip:{callbacks:{label:item=>`${item.dataset.label}：${signed(item.parsed.y,2,"%")}`}}
+      },
+      scales:{
+        x:{ticks:{color:textColor,maxTicksLimit:10,maxRotation:45,font:{size:10}},grid:{color:gridColor}},
+        y:{position:"right",ticks:{color:textColor,callback:value=>signed(value,1,"%"),font:{size:10}},grid:{color:gridColor}}
+      }
+    }
+  });
+}
+
+async function loadMarketHistory(force=false){
+  const status = $("#marketHistoryStatus");
+  if(!marketSelection.length){
+    status.textContent = "請至少選擇一個市場";
+    renderMarketHistoryChart([]);
+    return;
+  }
+  status.innerHTML = '<span class="spin"></span> 讀取 Yahoo Finance 歷史資料…';
+  const results = await Promise.allSettled(
+    marketSelection.map(symbol=>fetchMarketHistory(symbol,marketRange,force))
+  );
+  const series = [];
+  const failures = [];
+  results.forEach((result,index)=>{
+    const symbol = marketSelection[index];
+    if(result.status==="fulfilled") series.push({symbol,history:result.value});
+    else failures.push(marketMeta(symbol).name);
+  });
+  renderMarketHistoryChart(series);
+  status.textContent = series.length
+    ? `已載入 ${series.length} 個市場${failures.length?`；失敗：${failures.join("、")}`:""}`
+    : "歷史資料載入失敗，請稍後再試";
+}
+
+function openMarketDialog(symbol){
+  if(symbol && !marketSelection.includes(symbol)){
+    marketSelection = [symbol,...marketSelection].slice(0,4);
+    persistMarketSettings();
+  }
+  renderMarketControls();
+  $("#dlgMarket").showModal();
+  loadMarketHistory(false);
 }
 
 // 匯率（以同一基金 原幣 vs TWD 序列推算）
@@ -1576,6 +1851,44 @@ $("#csvFile").onchange = async e=>{
   catch(err){ $("#csvStatus").textContent = "❌ 讀取失敗："+err.message; }
 };
 $("#btnCsvOk").onclick = confirmCsvImport;
+$("#marketBar").onclick = event=>{
+  const refreshButton = event.target.closest("#btnMarketRefresh");
+  if(refreshButton){ loadMarketQuotes(true); return; }
+  const marketButton = event.target.closest("[data-market-symbol]");
+  if(marketButton) openMarketDialog(marketButton.dataset.marketSymbol);
+};
+$("#marketPicker").onchange = event=>{
+  const input = event.target.closest("input[data-market-pick]");
+  if(!input) return;
+  const symbol = input.dataset.marketPick;
+  if(input.checked){
+    if(marketSelection.length>=4){
+      input.checked = false;
+      toast("最多同時比較 4 個市場");
+      return;
+    }
+    marketSelection.push(symbol);
+  }else{
+    if(marketSelection.length<=1){
+      input.checked = true;
+      toast("至少保留 1 個市場");
+      return;
+    }
+    marketSelection = marketSelection.filter(value=>value!==symbol);
+  }
+  persistMarketSettings();
+  renderMarketControls();
+  loadMarketHistory(false);
+};
+$("#marketRanges").onclick = event=>{
+  const button = event.target.closest("[data-market-range]");
+  if(!button || button.dataset.marketRange===marketRange) return;
+  marketRange = button.dataset.marketRange;
+  persistMarketSettings();
+  renderMarketControls();
+  loadMarketHistory(false);
+};
+$("#btnMarketHistoryRefresh").onclick = ()=>loadMarketHistory(true);
 $("#btnTheme").onclick = ()=>{
   settings.theme = (document.body.dataset.theme==="light")?"dark":"light";
   document.body.dataset.theme = settings.theme;
@@ -1756,7 +2069,7 @@ $("#purBody").onclick = e=>{
   }
 };
 document.querySelectorAll("[data-close]").forEach(b=>{ b.onclick = ()=>document.getElementById(b.dataset.close).close(); });
-window.addEventListener("resize", ()=>{ if(chart) chart.resize(); });
+window.addEventListener("resize", ()=>{ if(chart) chart.resize(); if(marketChart) marketChart.resize(); });
 
 /* ---------------- PWA ---------------- */
 (function(){
@@ -1777,10 +2090,14 @@ window.addEventListener("resize", ()=>{ if(chart) chart.resize(); });
 /* ---------------- 啟動 ---------------- */
 (function init(){
   document.body.dataset.theme = settings.theme||"light";
+  marketSelection = marketSelection.filter(symbol=>MARKET_INDICES.some(item=>item.symbol===symbol)).slice(0,4);
+  if(!marketSelection.length) marketSelection = ["^TWII","^GSPC","^IXIC"];
   curRange = settings.defaultChartRange||"3M";
   if(!RANGES.some(r=>r[0]===curRange)) curRange="3M";
   if(holdings.length) selectedId = holdings[0].id;
   renderAll();
+  renderMarketBar();
+  loadMarketQuotes(false);
   applyRspPlans();   // 用快取淨值先補；更新完成後會再補一次
   const last = settings._lastRefresh ? new Date(settings._lastRefresh) : null;
   if(last) $("#updStatus").textContent = "上次更新 " + last.toLocaleString("zh-TW",{hour12:false});
