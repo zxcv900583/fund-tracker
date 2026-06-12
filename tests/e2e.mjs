@@ -35,6 +35,22 @@ async function waitForHttp(url, timeoutMs = 30000) {
   throw new Error(`Timed out waiting for ${url}: ${lastError?.message || "unknown error"}`);
 }
 
+async function removeProfileDirectory(path) {
+  if (!path) return;
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    try {
+      await rm(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
+      return;
+    } catch (error) {
+      if (!["EBUSY", "EPERM", "ENOTEMPTY"].includes(error?.code) || attempt === 5) {
+        console.warn(`[e2e] profile cleanup skipped: ${error.message}`);
+        return;
+      }
+      await sleep(attempt * 250);
+    }
+  }
+}
+
 function startStaticServer() {
   const contentTypes = {
     ".html": "text/html; charset=utf-8",
@@ -191,7 +207,8 @@ function seedScript() {
     localStorage.setItem("fund_tracker_holdings", JSON.stringify(holdings));
     localStorage.setItem("fund_tracker_settings", JSON.stringify({
       defaultChartRange:"1Y", currency:"TWD", refreshOnOpen:false, theme:"light",
-      marketSymbols:["^GSPC"], compareFundIds:["holding_a","holding_b"], marketRange:"1y"
+      marketSymbols:["^GSPC"], compareFundIds:["holding_a","holding_b"], marketRange:"1y",
+      swapGainLossColors:false
     }));
     localStorage.setItem("fund_tracker_nav_cache_F0HKG05X2C", JSON.stringify({
       fundCode:"F0HKG05X2C", lastUpdated:new Date().toISOString(),
@@ -242,15 +259,29 @@ async function run() {
   const initial = await cdp.evaluate(`({
     marketCards:document.querySelectorAll("[data-market-symbol]").length,
     marketStatus:document.querySelector("#marketStatus")?.textContent,
+    taiwanMarketText:document.querySelector('[data-market-symbol="^TWII"]')?.textContent,
     tableRows:document.querySelectorAll("#tbody tr").length,
     compareButtons:document.querySelectorAll('button[data-act="cmp"]').length,
+    priceHeading:document.querySelector('th[data-k="nav"]')?.textContent.trim(),
+    hasPriceDateHeading:[...document.querySelectorAll("#fundTable th")].some(th=>th.textContent.includes("價格日")),
+    updateButtonsTogether:document.querySelector("#btnRefresh")?.parentElement===document.querySelector("#btnMarketRefresh")?.parentElement,
+    shortRanges:[...document.querySelectorAll("#rangeTabs [data-r]")].map(button=>button.dataset.r).filter(value=>["1D","2D","5D","21D"].includes(value)),
+    sessionBeforeClose:taiwanSessionStatus(new Date("2026-06-12T05:29:00Z")).label,
+    sessionAtClose:taiwanSessionStatus(new Date("2026-06-12T05:30:00Z")).label,
     summaryCost:document.querySelector("#sumCost")?.textContent,
     fundChartPoints:chart?.data?.datasets?.[0]?.data?.filter(Number.isFinite).length || 0,
     workerBase:MARKET_API
   })`);
   assert.equal(initial.marketCards, 16);
   assert.equal(initial.tableRows, 2);
-  assert.equal(initial.compareButtons, 2);
+  assert.equal(initial.compareButtons, 4);
+  assert.equal(initial.priceHeading, "目前價格");
+  assert.equal(initial.hasPriceDateHeading, false);
+  assert.equal(initial.updateButtonsTogether, true);
+  assert.deepEqual(initial.shortRanges, ["1D","2D","5D","21D"]);
+  assert.equal(initial.sessionBeforeClose, "交易中");
+  assert.equal(initial.sessionAtClose, "已休市");
+  assert.match(initial.taiwanMarketText, /交易日/);
   assert.match(initial.summaryCost, /2,010/);
   assert.ok(initial.fundChartPoints > 20);
   assert.equal(initial.workerBase, localWorker);
@@ -275,6 +306,14 @@ async function run() {
   comparison.firstValues.forEach((value) => assert.ok(Math.abs(value) < 0.000001));
   comparison.points.forEach((count) => assert.ok(count > 20));
   assert.match(comparison.status, /共同起點/);
+  await cdp.evaluate(`document.querySelector('#marketRanges [data-market-range="1bd"]').click()`);
+  await waitForPage(cdp, `marketChart?.data?.datasets?.length===3 && marketChart.data.datasets.every(dataset=>dataset.data.filter(Number.isFinite).length===2)`,30000);
+  const comparisonBusinessDayPoints = await cdp.evaluate(
+    `marketChart.data.datasets.map(dataset=>dataset.data.filter(Number.isFinite).length)`
+  );
+  assert.deepEqual(comparisonBusinessDayPoints,[2,2,2]);
+  await cdp.evaluate(`document.querySelector('#marketRanges [data-market-range="1y"]').click()`);
+  await waitForPage(cdp, `marketChart?.data?.datasets?.every(dataset=>dataset.data.filter(Number.isFinite).length>20)`,30000);
   console.log("[e2e] fund and market comparison passed");
 
   await cdp.evaluate(`document.querySelector('#dlgMarket [data-close="dlgMarket"]').click()`);
@@ -365,6 +404,16 @@ async function run() {
   assert.ok(stockHolding.chartPoints > 20);
   console.log("[e2e] stock holding and chart passed");
 
+  const shortRangePoints = {};
+  for (const [range, expectedPoints] of [["1D",2],["2D",3],["5D",6],["21D",22]]) {
+    await cdp.evaluate(`document.querySelector('#rangeTabs [data-r="${range}"]').click()`);
+    await waitForPage(cdp, `chart?.data?.datasets?.[0]?.data?.filter(Number.isFinite).length===${expectedPoints}`);
+    shortRangePoints[range] = await cdp.evaluate(`chart.data.datasets[0].data.filter(Number.isFinite).length`);
+  }
+  assert.deepEqual(shortRangePoints, { "1D":2, "2D":3, "5D":6, "21D":22 });
+  await cdp.evaluate(`document.querySelector('#rangeTabs [data-r="1Y"]').click()`);
+  console.log("[e2e] business-day ranges passed");
+
   await cdp.evaluate(`(() => {
     const h=JSON.parse(localStorage.getItem("fund_tracker_holdings")).find(item=>item.symbol==="2330.TW");
     document.querySelector('button[data-act="mng"][data-id="'+h.id+'"]').click();
@@ -404,6 +453,22 @@ async function run() {
   const themeAfter = await cdp.evaluate(`document.body.dataset.theme`);
   assert.notEqual(themeBefore, themeAfter);
 
+  const colorsBeforeSwap = await cdp.evaluate(`({
+    up:getComputedStyle(document.body).getPropertyValue("--up").trim(),
+    down:getComputedStyle(document.body).getPropertyValue("--down").trim()
+  })`);
+  await cdp.evaluate(`document.querySelector("#btnColorSwap").click()`);
+  const colorsAfterSwap = await cdp.evaluate(`({
+    up:getComputedStyle(document.body).getPropertyValue("--up").trim(),
+    down:getComputedStyle(document.body).getPropertyValue("--down").trim(),
+    pressed:document.querySelector("#btnColorSwap").getAttribute("aria-pressed"),
+    saved:JSON.parse(localStorage.getItem("fund_tracker_settings")).swapGainLossColors
+  })`);
+  assert.equal(colorsAfterSwap.up, colorsBeforeSwap.down);
+  assert.equal(colorsAfterSwap.down, colorsBeforeSwap.up);
+  assert.equal(colorsAfterSwap.pressed, "true");
+  assert.equal(colorsAfterSwap.saved, true);
+
   await cdp.send("Emulation.setDeviceMetricsOverride", {
     width: 390,
     height: 844,
@@ -417,15 +482,35 @@ async function run() {
   const mobile = await cdp.evaluate(`({
     viewport:innerWidth,
     bodyWidth:document.body.scrollWidth,
+    actionDockPosition:getComputedStyle(document.querySelector("#actionDock")).position,
+    actionButtonHeight:Math.round(document.querySelector("#btnRefresh").getBoundingClientRect().height),
+    mobileRowActionsDisplay:getComputedStyle(document.querySelector(".mobile-row-actions")).display,
+    operationColumnDisplay:getComputedStyle(document.querySelector("#fundTable th:last-child")).display,
+    mainChartAreaHeight:Math.round(document.querySelector("#chartArea").getBoundingClientRect().height),
+    mainChartFontSize:chart.options.scales.x.ticks.font.size,
     dialogWidth:Math.round(document.querySelector("#dlgMarket").getBoundingClientRect().width),
     chartWidth:document.querySelector("#marketHistoryChart").width,
-    chartHeight:document.querySelector("#marketHistoryChart").height
+    chartHeight:document.querySelector("#marketHistoryChart").height,
+    compareChartFontSize:marketChart.options.scales.x.ticks.font.size
   })`);
   assert.equal(mobile.viewport, 390);
   assert.equal(mobile.bodyWidth, 390);
+  assert.equal(mobile.actionDockPosition, "fixed");
+  assert.ok(mobile.actionButtonHeight >= 50);
+  assert.equal(mobile.mobileRowActionsDisplay, "flex");
+  assert.equal(mobile.operationColumnDisplay, "none");
+  assert.ok(mobile.mainChartAreaHeight >= 400);
+  assert.ok(mobile.mainChartFontSize >= 13);
   assert.ok(mobile.dialogWidth <= 390);
   assert.ok(mobile.chartWidth > 300);
   assert.ok(mobile.chartHeight > 250);
+  assert.ok(mobile.compareChartFontSize >= 13);
+  const persistedColorSwap = await cdp.evaluate(`({
+    setting:JSON.parse(localStorage.getItem("fund_tracker_settings")).swapGainLossColors,
+    attribute:document.body.dataset.colorSwap,
+    pressed:document.querySelector("#btnColorSwap").getAttribute("aria-pressed")
+  })`);
+  assert.deepEqual(persistedColorSwap,{setting:true,attribute:"true",pressed:"true"});
 
   const runtimeErrors = cdp.events.filter((event) =>
     event.method === "Runtime.exceptionThrown" ||
@@ -439,12 +524,17 @@ async function run() {
     spawnedWorker,
     initial,
     comparison,
+    comparisonBusinessDayPoints,
     fundSearch,
     stockSearch,
     pickedStock,
     stockHolding,
+    shortRangePoints,
     stockManagement,
     stockComparison,
+    colorsBeforeSwap,
+    colorsAfterSwap,
+    persistedColorSwap,
     mobile,
   }, null, 2));
 }
@@ -472,6 +562,7 @@ try {
     await new Promise((resolve) => server.close(resolve));
   }
   if (profileDir) {
-    await rm(profileDir, { recursive: true, force: true });
+    await sleep(500);
+    await removeProfileDirectory(profileDir);
   }
 }
