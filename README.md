@@ -1,6 +1,6 @@
-# 📈 基金追蹤 Fund Tracker
+# 📈 基金與股票追蹤 Fund Tracker
 
-免登入、免安裝、免自建伺服器的台灣基金投資組合追蹤工具。單一 HTML 檔案的 PWA，開啟即用，投資組合資料只存在你自己的瀏覽器裡。
+免登入、免安裝的基金、股票與 ETF 投資組合追蹤工具。單一 HTML 檔案的 PWA，開啟即用，投資組合資料只存在你自己的瀏覽器裡。
 
 **🔗 線上使用：<https://zxcv900583.github.io/fund-tracker/>**
 
@@ -9,7 +9,8 @@
 ## 特色
 
 - **免登入追蹤淨值**——涵蓋台灣核備的境內外基金（資料來源 Morningstar 公開 API，免金鑰），每日淨值自動更新，歷史資料約 10 年
-- **全球市場比較**——16 個主要指數最新收盤與漲跌；點任一市場可選 1～4 個指數，比較 1 個月至 10 年的歷史相對報酬
+- **股票／ETF 持倉**——搜尋 `2330`、`0050`、`AAPL`、`SPY` 等代碼，以「股數 × 每股成交價 + 手續費」計算成本；台股支援零股，美股支援小數股
+- **跨資產比較**——庫存基金、股票／ETF 與 16 個主要指數可混合選擇最多 6 條走勢，比較 1 個月至 10 年的歷史相對報酬
 - **基富通報表一鍵匯入**——基富通網站「投資總覽 → 匯出報表」下載的 CSV 直接匯入，自動比對基金級別（含 TISA、好好退休 R 類、外幣級別），整個投資組合 30 秒搬進來；也可匯出成相同格式
 - **定期定額排程**——設定「每月幾日扣多少」，開啟時自動用扣款日（假日順延）淨值補上記錄，不用手動記帳
 - **金額買入**——輸入金額＋手續費自動換算單位數，成本計算含手續費
@@ -24,10 +25,10 @@
 ## 使用方式
 
 1. 開啟[網頁](https://zxcv900583.github.io/fund-tracker/)
-2. 「＋ 新增基金」搜尋名稱或 ISIN，填入買入記錄；或點「CSV」匯入基富通報表
+2. 「＋ 新增基金」搜尋名稱或 ISIN；「＋ 股票/ETF」搜尋商品代碼；也可點「CSV」匯入基富通報表
 3. 點「⟳ 更新」抓取最新淨值與歷史資料
 4. 點任一基金看走勢，點「📊 組合」看整體資產曲線
-5. 點上方任一全球市場卡片，開啟歷史報酬比較圖
+5. 點「比較」或持倉列的「比較」，混合比較庫存基金、股票與全球市場
 
 基富通的報表在「會員中心 → 投資總覽」的庫存列表右上角「匯出報表」下載：
 
@@ -37,13 +38,13 @@
 
 ## 隱私與免責
 
-- 本工具**不收集任何投資組合資料**：持倉只存在瀏覽器 localStorage；基金請求送往 Morningstar / 集保 TDCC，全球市場請求經專案的 Cloudflare Worker 轉送至 Yahoo Finance
-- Yahoo Finance 端點並非正式公開 API，資料可能延遲、異動或暫時中斷；介面失敗時保留最近一次成功快取
+- 本工具**不收集任何投資組合資料**：持倉只存在瀏覽器 localStorage；資料請求由專案的 Cloudflare Worker 代理至 Yahoo Finance、Morningstar、臺灣證交所與集保 TDCC
+- Yahoo Finance 端點並非正式公開 API，資料可能延遲、異動或暫時中斷；Worker 依序嘗試 Yahoo query1、query2、臺灣證交所官方台股備援，最後使用 Cloudflare KV 最近成功快取
 - 淨值與計算結果僅供參考，非投資建議；實際數字以銷售機構對帳單為準
 
 ## 技術
 
-前端為單檔 HTML + Chart.js。全球市場資料透過受限 Cloudflare Worker 取得，Worker 只接受固定 Yahoo Finance chart 路由、通過驗證的商品代碼、區間及頻率，不提供任意網址代理。
+前端為單檔 HTML + Chart.js。資料透過受限 Cloudflare Worker 取得，Worker 只接受固定路由與通過驗證的商品代碼、基金 ID、ISIN、日期、區間及頻率，不提供任意網址代理。
 
 重新部署 Worker：
 
@@ -54,8 +55,21 @@ wrangler deploy -c worker/wrangler.jsonc
 Worker 端點：
 
 - `GET /health`
+- `GET /health?deep=1`
+- `GET /api/assets/search?q=2330`
 - `GET /api/yahoo/quotes?symbols=^TWII,^GSPC`
 - `GET /api/yahoo/chart?symbol=^GSPC&range=10y&interval=1wk`
+- `GET /api/funds/search?term=統一奔騰`
+- `GET /api/funds/history?secId=F0HKG05X2C&currency=TWD&start=2026-01-01&end=2026-06-12`
+- `GET /api/funds/tdcc?isin=LU0820562030`
+
+本機驗證：
+
+```powershell
+node tests/api-smoke.mjs
+node tests/e2e.mjs
+wrangler deploy --dry-run -c worker/wrangler.jsonc
+```
 
 詳細規格見 [fund-tracker-spec.md](fund-tracker-spec.md)。
 

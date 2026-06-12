@@ -1,8 +1,45 @@
 # 基金追蹤分析軟體 — 產品規格書
 
-**版本：** v1.2<br>
+**版本：** v1.4<br>
 **日期：** 2026-06-12（v1.1：2026-06-11；v1.0：2026-06-10）<br>
 **作者：** Chan
+
+---
+
+## v1.4 更新摘要（2026-06-12）
+
+- 新增股票／ETF 搜尋與持倉，純數字台股代碼自動嘗試 `.TW`、`.TWO`；股票成本為「股數 × 每股成交價 + 手續費」。
+- 股票沿用既有持倉計算核心，支援最新價格、當日漲跌、現值、損益、報酬率、XIRR、股息記錄、歷史折線圖與 JSON 備份還原。
+- 比較圖可混合庫存基金、股票／ETF 與全球市場，最多 6 條走勢，使用共同可比較起始日正規化為 0%。
+- Cloudflare Worker 升級為多層備援：Yahoo query1 → query2 → TWSE 官方台灣指數／上市股票 → Cloudflare KV 最近成功快取。
+- 基金搜尋、歷史淨值與 TDCC 境外基金淨值也優先經 Cloudflare Worker；前端保留 Morningstar／TDCC 原站直連備援。
+- 新增 `/api/assets/search`、基金代理路由、`/health?deep=1` 七項來源檢查，以及可重複執行的 API 與無頭瀏覽器測試。
+
+### 股票持倉資料模型
+
+```json
+{
+  "assetType": "stock",
+  "symbol": "2330.TW",
+  "fundCode": "2330.TW",
+  "fundName": "台積電",
+  "currency": "TWD",
+  "exchange": "TAI",
+  "quoteType": "EQUITY",
+  "purchases": [
+    {
+      "type": "LUMP",
+      "date": "2026-06-12",
+      "units": 10,
+      "navAtPurchase": 2310,
+      "amount": 23100,
+      "fee": 20
+    }
+  ]
+}
+```
+
+`units` 對基金代表單位數，對股票代表股數；`navAtPurchase` 對基金代表買入淨值，對股票代表每股成交價。共用欄位可讓現值、損益、XIRR 與圖表使用同一組已驗證計算函式。
 
 ---
 
@@ -95,10 +132,10 @@ holding 新增:
 
 ### 2.1 形式
 
-**純前端 PWA（Progressive Web App）**
+**單檔 PWA + 無狀態 Cloudflare Worker**
 
 - 單一 HTML 檔案（或 Vite/React 打包）
-- 無後端伺服器
+- 持倉資料不傳至後端；Worker 僅代理固定市場／基金資料路由並提供 KV 備援快取
 - 手機瀏覽器可「加入主畫面」離線使用（Service Worker）
 - 淨值資料仍需網路才能更新
 

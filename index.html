@@ -85,7 +85,7 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
 .row2{display:flex;gap:10px}.row2>.field{flex:1}
 .radioRow{display:flex;gap:14px;padding:4px 0}
 .radioRow label{display:flex;align-items:center;gap:5px;font-size:14px;cursor:pointer}
-#searchResults{border:1px solid var(--border);border-radius:6px;max-height:230px;overflow:auto;margin-top:6px}
+#searchResults,#stockSearchResults{border:1px solid var(--border);border-radius:6px;max-height:230px;overflow:auto;margin-top:6px}
 .sr-item{padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;gap:8px;align-items:center}
 .sr-item:last-child{border-bottom:none}
 .sr-item:hover{background:var(--hover)}
@@ -125,9 +125,10 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
 #marketBarTools{display:flex;align-items:center;gap:6px;padding:5px 8px;min-width:max-content}
 #marketStatus{font-size:10px;color:var(--muted)}
 #dlgMarket{width:min(920px,96vw);max-width:920px}
-#marketPicker{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+#fundPicker,#marketPicker{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
 .market-pick{display:flex;align-items:center;gap:5px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--panel2);font-size:12px;cursor:pointer}
 .market-pick:has(input:checked){border-color:var(--accent);background:var(--sel)}
+.compare-section-title{font-size:12px;font-weight:700;color:var(--muted);margin:8px 0 6px}
 #marketHistoryWrap{height:min(430px,52vh);position:relative;border:1px solid var(--border);border-radius:8px;padding:6px}
 #marketHistoryChart{position:absolute;inset:6px}
 #marketHistoryStatus{min-height:20px;margin:7px 0;font-size:12px;color:var(--muted)}
@@ -150,7 +151,9 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
   <div class="hd-top">
     <h1>📈 基金追蹤</h1>
     <button class="btn primary" id="btnAdd">＋ 新增基金</button>
+    <button class="btn primary" id="btnAddStock">＋ 股票/ETF</button>
     <button class="btn" id="btnRefresh">⟳ 更新</button>
+    <button class="btn" id="btnCompare" title="比較庫存基金與全球市場">比較</button>
     <span class="spacer"></span>
     <button class="btn" id="btnExport" title="匯出 JSON">匯出</button>
     <button class="btn" id="btnImport" title="匯入 JSON">匯入</button>
@@ -178,11 +181,11 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
 <div id="tableWrap">
   <table id="fundTable">
     <thead><tr>
-      <th data-k="name">基金名稱 <span class="arr"></span></th>
-      <th data-k="nav">最新淨值 <span class="arr"></span></th>
-      <th data-k="navDate">淨值日 <span class="arr"></span></th>
+      <th data-k="name">資產名稱 <span class="arr"></span></th>
+      <th data-k="nav">最新價格 <span class="arr"></span></th>
+      <th data-k="navDate">價格日 <span class="arr"></span></th>
       <th data-k="dayChg">當日漲跌 <span class="arr"></span></th>
-      <th data-k="units">持有單位 <span class="arr"></span></th>
+      <th data-k="units">持有數量 <span class="arr"></span></th>
       <th data-k="cost">持有成本 <span class="arr"></span></th>
       <th data-k="value">現值 <span class="arr"></span></th>
       <th data-k="pl" title="含配息">損益 <span class="arr"></span></th>
@@ -194,8 +197,8 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
     <tbody id="tbody"></tbody>
   </table>
   <div id="emptyHint" hidden>
-    <div class="big">尚未加入任何基金</div>
-    <div>點擊上方「＋ 新增基金」搜尋並加入您的投資組合</div>
+    <div class="big">尚未加入任何資產</div>
+    <div>可新增投信基金，或用股票代碼加入股票／ETF</div>
   </div>
 </div>
 
@@ -209,7 +212,7 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
   </div>
   <div id="chartWrap">
     <canvas id="chartCanvas"></canvas>
-    <div id="chartHint">選擇基金以顯示走勢圖</div>
+    <div id="chartHint">選擇資產以顯示走勢圖</div>
   </div>
 </div>
 
@@ -264,6 +267,41 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
   </div>
 </dialog>
 
+<!-- ===== 新增股票 / ETF Dialog ===== -->
+<dialog id="dlgStock">
+  <div class="dlgHead"><span>新增股票 / ETF</span><button class="xBtn" data-close="dlgStock">✕</button></div>
+  <div class="dlgBody">
+    <div id="stockStep1">
+      <div class="field">
+        <label>搜尋代碼或名稱</label>
+        <input type="text" id="stockSearchInput" placeholder="台股：2330、0050；美股：AAPL、SPY" autocomplete="off">
+      </div>
+      <div id="stockSearchStatus" class="subTxt"></div>
+      <div id="stockSearchResults" hidden></div>
+      <div class="note">純數字台股代碼會自動加上 <b>.TW</b>；搜尋與價格經 Cloudflare Worker 取得 Yahoo Finance 資料。</div>
+    </div>
+    <div id="stockStep2" hidden>
+      <div class="field"><label>已選資產</label><div id="pickedStock" style="font-weight:700"></div></div>
+      <div class="row2">
+        <div class="field"><label>買入日期</label><input type="date" id="stockDate"></div>
+        <div class="field"><label>股數</label><input type="number" id="stockShares" min="0" step="any" placeholder="例：10"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>每股成交價</label><input type="number" id="stockPrice" min="0" step="any"></div>
+        <div class="field"><label>手續費</label><input type="number" id="stockFee" min="0" step="any" placeholder="0"></div>
+      </div>
+      <div class="field"><label>交易總成本</label><input type="text" id="stockTotal" readonly></div>
+      <div class="field"><label>備註</label><input type="text" id="stockNote" placeholder="選填"></div>
+      <div class="note">總成本 = 股數 × 每股成交價 + 手續費。台股可輸入零股；美股可輸入小數股。外幣股票會以目前估算匯率換算總資產。</div>
+    </div>
+  </div>
+  <div class="dlgFoot">
+    <button class="btn" id="btnStockBack" hidden>返回搜尋</button>
+    <button class="btn" data-close="dlgStock">取消</button>
+    <button class="btn primary" id="btnStockConfirm" hidden>加入持倉</button>
+  </div>
+</dialog>
+
 <!-- ===== 買入記錄管理 Dialog ===== -->
 <dialog id="dlgMng">
   <div class="dlgHead"><span id="mngTitle">買入記錄</span><button class="xBtn" data-close="dlgMng">✕</button></div>
@@ -284,13 +322,13 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
       </div>
       <div class="row2">
         <div class="field"><label>買入日期</label><input type="date" id="eDate"></div>
-        <div class="field"><label>買入金額（計價幣別）</label><input type="number" id="eAmt" min="0" step="any" placeholder="例：3000"></div>
+        <div class="field"><label id="eAmtLabel">買入金額（計價幣別）</label><input type="number" id="eAmt" min="0" step="any" placeholder="例：3000"></div>
       </div>
       <div class="row2">
         <div class="field"><label>手續費（選填）</label><input type="number" id="eFee" min="0" step="any" placeholder="0"></div>
-        <div class="field"><label>買入單位數</label><input type="number" id="eUnits" min="0" step="any" placeholder="填金額自動換算"></div>
+        <div class="field"><label id="eUnitsLabel">買入單位數</label><input type="number" id="eUnits" min="0" step="any" placeholder="填金額自動換算"></div>
       </div>
-      <div class="field"><label>買入淨值</label>
+      <div class="field"><label id="eNavLabel">買入淨值</label>
         <div class="navRow"><input type="number" id="eNav" min="0" step="any"><button class="btn" id="btnENavLookup">查詢</button></div>
       </div>
       <div class="field"><label>備註</label><input type="text" id="eNote"></div>
@@ -321,7 +359,7 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
       <div class="note">配息選「再投入」者：記一筆配息＋一筆同金額的買入記錄，報酬即計算正確。</div>
     </div>
 
-    <div style="border-top:2px solid var(--border);margin-top:14px;padding-top:10px">
+    <div id="rspSection" style="border-top:2px solid var(--border);margin-top:14px;padding-top:10px">
       <div class="secHead">🔁 定期定額排程</div>
       <div id="rspList"></div>
       <div class="row2">
@@ -379,11 +417,14 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
   </div>
 </dialog>
 
-<!-- ===== 全球市場歷史比較 Dialog ===== -->
+<!-- ===== 基金與全球市場比較 Dialog ===== -->
 <dialog id="dlgMarket">
-  <div class="dlgHead"><span>全球市場歷史比較</span><button class="xBtn" data-close="dlgMarket">✕</button></div>
+  <div class="dlgHead"><span>基金與全球市場比較</span><button class="xBtn" data-close="dlgMarket">✕</button></div>
   <div class="dlgBody">
-    <div class="note" style="margin:0 0 8px">選擇 1 至 4 個市場；走勢以區間第一筆資料為 0%，方便比較相對漲跌。</div>
+    <div class="note" style="margin:0 0 8px">最多選擇 6 個基金或市場；所有走勢以共同可比較起始日為 0%，避免不同成立日或交易日造成誤判。</div>
+    <div class="compare-section-title">庫存基金</div>
+    <div id="fundPicker"></div>
+    <div class="compare-section-title">全球市場</div>
     <div id="marketPicker"></div>
     <div class="tabs" id="marketRanges"></div>
     <div id="marketHistoryStatus"></div>
@@ -404,15 +445,19 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
 <script>
 "use strict";
 /* ================================================================
-   基金追蹤 — 單檔 PWA（v1.2）
+   基金追蹤 — 單檔 PWA（v1.4）
    資料來源：
    1. Morningstar screener  : 基金搜尋 + 最新淨值（境內外台灣核備基金）
    2. Morningstar timeseries: 每日淨值歷史（約 10 年）
    3. TDCC OpenAPI 3-4      : 境外基金淨值（備援）
-   4. Yahoo Finance v8      : 全球市場報價與歷史（經受限 Cloudflare Worker）
+   4. Yahoo Finance v8      : 全球市場報價與歷史（Cloudflare query1→query2→KV）
+   5. TWSE OpenAPI          : 台灣加權指數官方備援
+   6. Cloudflare Worker     : Morningstar / TDCC 受限代理，原站直連備援
    v1.1 新增：金額買入(含手續費)、定期定額排程自動補記錄、
               配息記錄與含息報酬、投資組合走勢圖、XIRR 年化、CSV 批次匯入
    v1.2 新增：全球市場報價列、最多四市場歷史報酬比較
+   v1.3 新增：庫存基金互比、基金與市場比較、多來源 API 備援
+   v1.4 新增：股票／ETF 持倉、股數與交易成本、跨資產比較
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
@@ -424,7 +469,9 @@ const LS_S = "fund_tracker_settings";
 const LS_FX = "fund_tracker_fx";
 const NAV_PREFIX = "fund_tracker_nav_cache_";
 const MAX_HIST = 3650; // 約 10 年
-const MARKET_API = "https://fund-tracker-proxy.fund-tracker-proxy.workers.dev";
+const MARKET_API = (location.hostname==="127.0.0.1" || location.hostname==="localhost")
+  ? "http://127.0.0.1:8790"
+  : "https://fund-tracker-proxy.fund-tracker-proxy.workers.dev";
 const LS_MARKET_CACHE = "fund_tracker_market_cache_v2";
 const MARKET_INDICES = [
   {symbol:"^TWII", name:"台灣加權"},
@@ -448,7 +495,8 @@ const MARKET_RANGES = [
   ["1月","1mo"],["3月","3mo"],["6月","6mo"],["1年","1y"],
   ["2年","2y"],["5年","5y"],["10年","10y"]
 ];
-const MARKET_COLORS = ["#2563eb","#f59e0b","#16a34a","#dc2626"];
+const COMPARE_COLORS = ["#2563eb","#f59e0b","#16a34a","#dc2626","#9333ea","#0891b2"];
+const MAX_COMPARE = 6;
 
 const $ = s => document.querySelector(s);
 const fmtN = (n, d=2) => (n==null||isNaN(n)) ? "—" : n.toLocaleString("zh-TW",{minimumFractionDigits:d,maximumFractionDigits:d});
@@ -460,8 +508,8 @@ const signed = (v,d=2,suf="") => (v==null||isNaN(v)) ? "—" : (v>0?"+":"") + fm
 const uid = p => p + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
 const esc = s => String(s??"").replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
-function lsGet(k, d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } }
-function lsSet(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){ toast("⚠ 儲存失敗（localStorage 可能已滿）"); } }
+function lsGet(k, d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ console.warn(`讀取本機資料失敗：${k}`,e); return d; } }
+function lsSet(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){ console.error(`儲存本機資料失敗：${k}`,e); toast("⚠ 儲存失敗（localStorage 可能已滿）"); } }
 
 let toastTimer=null;
 function toast(msg, ms=2600){ const t=$("#toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove("show"), ms); }
@@ -470,6 +518,8 @@ function toast(msg, ms=2600){ const t=$("#toast"); t.textContent=msg; t.classLis
 let holdings = lsGet(LS_H, []);
 function normalizeHoldings(){
   holdings.forEach(h=>{
+    h.assetType = h.assetType==="stock" ? "stock" : "fund";
+    h.symbol = h.symbol || (h.assetType==="stock" ? h.fundCode : "");
     h.purchases = h.purchases||[];
     h.dividends = h.dividends||[];
     h.rspPlans  = h.rspPlans||[];
@@ -487,11 +537,14 @@ let sortKey = null, sortAsc = true;
 let chart = null;
 let marketChart = null;
 let marketCache = lsGet(LS_MARKET_CACHE, {quotes:{}, fetchedAt:null});
-let marketSelection = Array.isArray(settings.marketSymbols) ? settings.marketSymbols.slice(0,4) : ["^TWII","^GSPC","^IXIC"];
+let marketSelection = Array.isArray(settings.marketSymbols) ? settings.marketSymbols.slice(0,MAX_COMPARE) : ["^TWII","^GSPC","^IXIC"];
+let compareFundIds = Array.isArray(settings.compareFundIds) ? settings.compareFundIds.slice(0,MAX_COMPARE) : [];
 let marketRange = MARKET_RANGES.some(([,value])=>value===settings.marketRange) ? settings.marketRange : "1y";
 let marketHistoryCache = new Map();
 let marketLoading = false;
+let apiDiagnostics = {fundSearch:null,fundHistory:null,tdcc:null,market:null};
 let picked = null;                 // 搜尋選中的基金
+let pickedStock = null;
 let mngHoldingId = null, editPurId = null, editDivId = null;
 let chartView = "fund";            // fund | portfolio
 
@@ -506,10 +559,22 @@ async function fetchT(url, ms=20000){
 
 // 搜尋基金（Morningstar screener）
 async function msSearch(term){
+  try{
+    const payload = await marketFetch(`/api/funds/search?term=${encodeURIComponent(term)}`);
+    apiDiagnostics.fundSearch = payload.source||"cloudflare";
+    return mapMorningstarRows(payload.rows||[]);
+  }catch(proxyError){
+    console.warn("基金搜尋代理失敗，改用 Morningstar 直連", proxyError);
+  }
   const dp = "SecId|Name|LegalName|ClosePrice|ClosePriceDate|PriceCurrency|ISIN|CategoryName|CustomCategoryId";
   const url = `${MS_BASE}/${MS_TOKEN}/security/screener?page=1&pageSize=25&sortOrder=${encodeURIComponent("Name asc")}&outputType=json&version=1&languageId=zh-TW&currencyId=TWD&universeIds=${encodeURIComponent(UNIVERSE)}&securityDataPoints=${encodeURIComponent(dp)}&term=${encodeURIComponent(term)}`;
   const j = await (await fetchT(url)).json();
-  return (j.rows||[]).map(r=>({
+  apiDiagnostics.fundSearch = "morningstar-direct";
+  return mapMorningstarRows(j.rows||[]);
+}
+
+function mapMorningstarRows(rows){
+  return rows.map(r=>({
     secId:r.SecId, name:r.Name||r.LegalName, nav:r.ClosePrice, navDate:r.ClosePriceDate,
     currency:r.PriceCurrency||"TWD", isin:r.ISIN||"", category:r.CategoryName||""
   }));
@@ -517,17 +582,65 @@ async function msSearch(term){
 
 // 淨值歷史（Morningstar timeseries, 計價幣別）
 async function msHistory(secId, startDate, endDate, currencyId){
+  try{
+    const payload = await marketFetch(`/api/funds/history?secId=${encodeURIComponent(secId)}&currency=${encodeURIComponent(currencyId||"")}&start=${startDate}&end=${endDate}`, 30000);
+    apiDiagnostics.fundHistory = payload.source||"cloudflare";
+    return normalizeMorningstarHistory(payload.history);
+  }catch(proxyError){
+    console.warn("基金歷史代理失敗，改用 Morningstar 直連", proxyError);
+  }
   const id = `${secId}]2]0]${UNIVERSE}`;
   const url = `${MS_BASE}/timeseries_price/${MS_TOKEN}?id=${encodeURIComponent(id)}&currencyId=${encodeURIComponent(currencyId||"")}&idtype=Morningstar&frequency=daily&startDate=${startDate}&endDate=${endDate}&outputType=COMPACTJSON`;
   const j = await (await fetchT(url, 25000)).json();
-  // [[ms,nav],...] → [{date,nav}]
-  return (Array.isArray(j)?j:[]).map(p=>({date:new Date(p[0]).toISOString().slice(0,10), nav:p[1]}));
+  apiDiagnostics.fundHistory = "morningstar-direct";
+  return normalizeMorningstarHistory(j);
+}
+
+function normalizeMorningstarHistory(payload){
+  const byDate = new Map();
+  (Array.isArray(payload)?payload:[]).forEach(point=>{
+    if(!Array.isArray(point) || !Number.isFinite(point[0]) || !Number.isFinite(point[1]) || point[1]<=0) return;
+    const date = new Date(point[0]).toISOString().slice(0,10);
+    if(/^\d{4}-\d{2}-\d{2}$/.test(date)) byDate.set(date, point[1]);
+  });
+  return [...byDate.entries()].map(([date,nav])=>({date,nav})).sort((a,b)=>a.date.localeCompare(b.date));
+}
+
+async function assetSearch(term){
+  const payload = await marketFetch(`/api/assets/search?q=${encodeURIComponent(term)}`);
+  const symbols = (payload.quotes||[]).map(item=>item.symbol).filter(Boolean);
+  const quoteMap = {};
+  if(symbols.length){
+    const quotes = await marketFetch(`/api/yahoo/quotes?symbols=${encodeURIComponent(symbols.join(","))}`, 30000);
+    (quotes.quotes||[]).forEach(quote=>{ if(!quote.error) quoteMap[quote.symbol]=quote; });
+  }
+  return (payload.quotes||[]).map(item=>({
+    ...item,
+    quote:quoteMap[item.symbol]||null
+  })).filter(item=>item.quote && Number.isFinite(item.quote.price) && item.quote.price>0);
+}
+
+async function stockHistory(symbol, range="10y"){
+  const interval = range==="10y" ? "1wk" : "1d";
+  const payload = await marketFetch(`/api/yahoo/chart?symbol=${encodeURIComponent(symbol)}&range=${range}&interval=${interval}`,30000);
+  const history = parseMarketHistory(payload).map(point=>({date:point.date,nav:point.value}));
+  if(history.length<2) throw new Error("股票歷史資料不足");
+  return {history,source:payload._meta?.source||"unknown"};
 }
 
 // TDCC 備援（境外基金最新淨值, 以 ISIN 比對）
 let tdccCache = null;
 async function tdccOffshoreNav(isin){
   if(!isin) return null;
+  try{
+    const payload = await marketFetch(`/api/funds/tdcc?isin=${encodeURIComponent(isin)}`, 45000);
+    if(payload.latest?.nav>0){
+      apiDiagnostics.tdcc = payload.source||"cloudflare";
+      return payload.latest;
+    }
+  }catch(proxyError){
+    console.warn("TDCC 代理失敗，改用原站直連", proxyError);
+  }
   try{
     if(!tdccCache){
       const j = await (await fetchT("https://openapi.tdcc.com.tw/v1/opendata/3-4", 30000)).json();
@@ -538,8 +651,14 @@ async function tdccOffshoreNav(isin){
     rows.sort((a,b)=>String(a["日期"]).localeCompare(String(b["日期"])));
     const last = rows[rows.length-1];
     const d = String(last["日期"]);
-    return {date:`${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`, nav:parseFloat(last["基金淨值(金額)"])};
-  }catch(e){ return null; }
+    const nav = parseFloat(last["基金淨值(金額)"]);
+    if(!(nav>0) || !/^\d{8}$/.test(d)) return null;
+    apiDiagnostics.tdcc = "tdcc-direct";
+    return {date:`${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`, nav};
+  }catch(e){
+    console.error("TDCC 直連失敗", e);
+    return null;
+  }
 }
 
 /* ---------------- 全球市場（Yahoo Finance via Cloudflare Worker） ---------------- */
@@ -558,6 +677,18 @@ function marketPriceText(value){
   if(!Number.isFinite(value)) return "—";
   const digits = Math.abs(value)>=1000 ? 0 : Math.abs(value)>=10 ? 2 : 4;
   return fmtN(value, digits);
+}
+
+function dataSourceLabel(source){
+  if(!source) return "";
+  if(source==="yahoo-query1") return "Yahoo 1";
+  if(source==="yahoo-query2") return "Yahoo 2";
+  if(source==="twse") return "TWSE";
+  if(source==="twse-stock") return "TWSE 個股";
+  if(source.startsWith("cloudflare-kv:")) return "Cloudflare 快取";
+  if(source.includes("morningstar")) return source.includes("direct")?"Morningstar 直連":"Morningstar 代理";
+  if(source.includes("tdcc")) return source.includes("direct")?"TDCC 直連":"TDCC 代理";
+  return source;
 }
 
 function renderMarketBar(message=""){
@@ -581,8 +712,9 @@ function renderMarketBar(message=""){
     </button>`;
   }).join("");
   const fetched = marketCache?.fetchedAt ? new Date(marketCache.fetchedAt) : null;
+  const sourceText = (marketCache?.sources||[]).map(dataSourceLabel).filter(Boolean).join("＋");
   const status = message || (fetched && !isNaN(fetched)
-    ? "Yahoo · " + fetched.toLocaleTimeString("zh-TW",{hour:"2-digit",minute:"2-digit",hour12:false})
+    ? `${sourceText||"市場 API"} · ` + fetched.toLocaleTimeString("zh-TW",{hour:"2-digit",minute:"2-digit",hour12:false})
     : "尚未更新");
   $("#marketBar").innerHTML = cards + `<div id="marketBarTools">
     <span id="marketStatus">${esc(status)}</span>
@@ -606,13 +738,14 @@ async function loadMarketQuotes(force=false){
     const nextQuotes = {...(marketCache?.quotes||{})};
     let successCount = 0;
     (payload.quotes||[]).forEach(quote=>{
-      if(!quote?.error && Number.isFinite(quote.price)){
+      if(!quote?.error && Number.isFinite(quote.price) && quote.price>0){
         nextQuotes[quote.symbol] = quote;
         successCount++;
       }
     });
     if(!successCount) throw new Error("所有市場報價皆無資料");
-    marketCache = {quotes:nextQuotes, fetchedAt:payload.fetchedAt||new Date().toISOString()};
+    marketCache = {quotes:nextQuotes, sources:payload.sources||[], fetchedAt:payload.fetchedAt||new Date().toISOString()};
+    apiDiagnostics.market = (payload.sources||[]).join(",");
     lsSet(LS_MARKET_CACHE, marketCache);
     renderMarketBar(successCount<MARKET_INDICES.length ? `部分更新 ${successCount}/${MARKET_INDICES.length}` : "");
   }catch(error){
@@ -629,10 +762,16 @@ function parseMarketHistory(payload){
   const timestamps = result.timestamp||[];
   const adjusted = result.indicators?.adjclose?.[0]?.adjclose;
   const closes = adjusted||result.indicators?.quote?.[0]?.close||[];
-  return timestamps.map((timestamp,index)=>({
+  const byDate = new Map();
+  timestamps.map((timestamp,index)=>({
     date:new Date(timestamp*1000).toISOString().slice(0,10),
     value:closes[index]
-  })).filter(item=>Number.isFinite(item.value));
+  })).forEach(item=>{
+    if(/^\d{4}-\d{2}-\d{2}$/.test(item.date) && Number.isFinite(item.value) && item.value>0){
+      byDate.set(item.date,item.value);
+    }
+  });
+  return [...byDate.entries()].map(([date,value])=>({date,value})).sort((a,b)=>a.date.localeCompare(b.date));
 }
 
 async function fetchMarketHistory(symbol, range, force=false){
@@ -642,17 +781,29 @@ async function fetchMarketHistory(symbol, range, force=false){
   const payload = await marketFetch(`/api/yahoo/chart?symbol=${encodeURIComponent(symbol)}&range=${range}&interval=${interval}`, 30000);
   const history = parseMarketHistory(payload);
   if(history.length<2) throw new Error(`${symbol} 歷史資料不足`);
-  marketHistoryCache.set(cacheKey, history);
-  return history;
+  const result = {
+    history,
+    source:payload._meta?.source||"unknown",
+    stale:Boolean(payload._meta?.stale),
+    partial:Boolean(payload._meta?.partial)
+  };
+  marketHistoryCache.set(cacheKey, result);
+  return result;
 }
 
 function persistMarketSettings(){
   settings.marketSymbols = marketSelection.slice();
+  settings.compareFundIds = compareFundIds.slice();
   settings.marketRange = marketRange;
   lsSet(LS_S, settings);
 }
 
 function renderMarketControls(){
+  compareFundIds = compareFundIds.filter(id=>holdings.some(h=>h.id===id));
+  $("#fundPicker").innerHTML = holdings.length ? holdings.map(h=>`<label class="market-pick">
+    <input type="checkbox" data-fund-pick="${esc(h.id)}" ${compareFundIds.includes(h.id)?"checked":""}>
+    ${h.assetType==="stock"?"股票":"基金"} · ${esc(h.fundName)}${h.assetType==="stock"&&h.symbol?`（${esc(h.symbol)}）`:""}
+  </label>`).join("") : '<span class="subTxt">尚無庫存基金</span>';
   $("#marketPicker").innerHTML = MARKET_INDICES.map(item=>`<label class="market-pick">
     <input type="checkbox" data-market-pick="${esc(item.symbol)}" ${marketSelection.includes(item.symbol)?"checked":""}>
     ${esc(item.name)}
@@ -664,23 +815,31 @@ function renderMarketControls(){
 
 function renderMarketHistoryChart(series){
   if(marketChart){ marketChart.destroy(); marketChart=null; }
-  if(!series.length) return;
+  if(!series.length) return null;
 
-  const dates = [...new Set(series.flatMap(item=>item.history.map(point=>point.date)))].sort();
+  const commonStart = series.map(item=>item.history[0]?.date).filter(Boolean).sort().at(-1);
+  const aligned = series.map(item=>({
+    ...item,
+    history:item.history.filter(point=>point.date>=commonStart)
+  })).filter(item=>item.history.length>=2);
+  if(!aligned.length) return null;
+
+  const dates = [...new Set(aligned.flatMap(item=>item.history.map(point=>point.date)))].sort();
   const gridColor = getComputedStyle(document.body).getPropertyValue("--border").trim();
   const textColor = getComputedStyle(document.body).getPropertyValue("--muted").trim();
-  const datasets = series.map((item,index)=>{
+  const datasets = aligned.map((item,index)=>{
     const first = item.history.find(point=>Number.isFinite(point.value))?.value;
     const valueByDate = new Map(item.history.map(point=>[point.date,point.value]));
     return {
-      label:marketMeta(item.symbol).name,
+      label:item.label,
       data:dates.map(date=>{
         const value = valueByDate.get(date);
         return Number.isFinite(value) && first ? (value/first-1)*100 : null;
       }),
-      borderColor:MARKET_COLORS[index],
-      backgroundColor:MARKET_COLORS[index],
+      borderColor:COMPARE_COLORS[index],
+      backgroundColor:COMPARE_COLORS[index],
       borderWidth:1.8,
+      borderDash:item.type==="market"?[5,3]:[],
       pointRadius:0,
       pointHoverRadius:3,
       tension:0,
@@ -707,35 +866,96 @@ function renderMarketHistoryChart(series){
       }
     }
   });
+  return commonStart;
+}
+
+function compareRangeStart(){
+  const days = { "1mo":31, "3mo":93, "6mo":186, "1y":366, "2y":732, "5y":1830, "10y":3660 };
+  return addDays(todayStr(), -(days[marketRange]||366));
+}
+
+function fundCompareHistory(holding){
+  const start = compareRangeStart();
+  return getCache(holding).navHistory
+    .filter(point=>point.date>=start && point.date<=todayStr() && Number.isFinite(point.nav) && point.nav>0)
+    .map(point=>({date:point.date,value:point.nav}));
+}
+
+function compareSelectionCount(){
+  return compareFundIds.length + marketSelection.length;
+}
+
+function addCompareSelection(type, id){
+  const list = type==="fund" ? compareFundIds : marketSelection;
+  if(list.includes(id)) return true;
+  if(compareSelectionCount()>=MAX_COMPARE){
+    toast(`最多同時比較 ${MAX_COMPARE} 個基金或市場`);
+    return false;
+  }
+  list.push(id);
+  persistMarketSettings();
+  return true;
 }
 
 async function loadMarketHistory(force=false){
   const status = $("#marketHistoryStatus");
-  if(!marketSelection.length){
-    status.textContent = "請至少選擇一個市場";
+  if(!compareSelectionCount()){
+    status.textContent = "請至少選擇一個基金或市場";
     renderMarketHistoryChart([]);
     return;
   }
-  status.innerHTML = '<span class="spin"></span> 讀取 Yahoo Finance 歷史資料…';
+  status.innerHTML = '<span class="spin"></span> 整理基金與市場歷史資料…';
+  const series = [];
+  const failures = [];
+
+  compareFundIds.forEach(id=>{
+    const holding = holdings.find(h=>h.id===id);
+    if(!holding) return;
+    const history = fundCompareHistory(holding);
+    if(history.length>=2){
+      series.push({
+        key:`fund:${id}`,
+        type:"fund",
+        label:`${holding.assetType==="stock"?"股票":"基金"} · ${holding.fundName}${holding.assetType==="stock"&&holding.symbol?`（${holding.symbol}）`:""}`,
+        history,
+        source:getCache(holding).source||"local-cache"
+      });
+    }else{
+      failures.push(`${holding.fundName}（請先更新淨值）`);
+    }
+  });
+
   const results = await Promise.allSettled(
     marketSelection.map(symbol=>fetchMarketHistory(symbol,marketRange,force))
   );
-  const series = [];
-  const failures = [];
   results.forEach((result,index)=>{
     const symbol = marketSelection[index];
-    if(result.status==="fulfilled") series.push({symbol,history:result.value});
+    if(result.status==="fulfilled"){
+      series.push({
+        key:`market:${symbol}`,
+        type:"market",
+        label:`市場 · ${marketMeta(symbol).name}`,
+        history:result.value.history,
+        source:result.value.source,
+        stale:result.value.stale
+      });
+    }
     else failures.push(marketMeta(symbol).name);
   });
-  renderMarketHistoryChart(series);
+  const commonStart = renderMarketHistoryChart(series);
+  const sources = [...new Set(series.map(item=>dataSourceLabel(item.source)).filter(Boolean))];
+  const stale = series.some(item=>item.stale);
   status.textContent = series.length
-    ? `已載入 ${series.length} 個市場${failures.length?`；失敗：${failures.join("、")}`:""}`
+    ? `已載入 ${series.length} 條走勢${commonStart?`；共同起點 ${commonStart}`:""}${sources.length?`；來源 ${sources.join("、")}`:""}${stale?"；含快取資料":""}${failures.length?`；無法載入：${failures.join("、")}`:""}`
     : "歷史資料載入失敗，請稍後再試";
 }
 
-function openMarketDialog(symbol){
-  if(symbol && !marketSelection.includes(symbol)){
-    marketSelection = [symbol,...marketSelection].slice(0,4);
+function openMarketDialog(symbol=null, fundId=null){
+  if(symbol) addCompareSelection("market",symbol);
+  if(fundId) addCompareSelection("fund",fundId);
+  if(!compareSelectionCount()){
+    if(holdings.length) compareFundIds = holdings.slice(0,2).map(h=>h.id);
+    else marketSelection = ["^TWII","^GSPC"];
     persistMarketSettings();
   }
   renderMarketControls();
@@ -749,6 +969,19 @@ async function ensureFx(h){
   if(cur==="TWD") return 1;
   const c = fxCache[cur];
   if(c && c.date===todayStr()) return c.rate;
+  try{
+    const symbol = `${cur}TWD=X`;
+    const payload = await marketFetch(`/api/yahoo/quotes?symbols=${encodeURIComponent(symbol)}`,20000);
+    const quote = payload.quotes?.find(item=>item.symbol===symbol && Number.isFinite(item.price) && item.price>0);
+    if(quote){
+      fxCache[cur] = {rate:quote.price,date:todayStr(),source:quote.source};
+      lsSet(LS_FX,fxCache);
+      return quote.price;
+    }
+  }catch(error){
+    console.warn(`匯率 ${cur}/TWD Yahoo 查詢失敗`,error);
+  }
+  if(h.assetType==="stock") return (c && c.rate) || 1;
   try{
     const end = todayStr(), start = addDays(end,-14);
     const [base, twd] = await Promise.all([
@@ -767,7 +1000,9 @@ async function ensureFx(h){
         }
       }
     }
-  }catch(e){}
+  }catch(e){
+    console.warn(`Morningstar 匯率推算失敗：${cur}/TWD`,e);
+  }
   return (c && c.rate) || 1; // 失敗時用舊匯率或 1
 }
 
@@ -777,13 +1012,16 @@ function getCache(h){
   if(!navMem[h.fundCode]) navMem[h.fundCode] = lsGet(navKey(h.fundCode), {fundCode:h.fundCode, lastUpdated:null, navHistory:[]});
   return navMem[h.fundCode];
 }
-function mergeHistory(h, list){
+function mergeHistory(h, list, source=null){
   const c = getCache(h);
   const map = new Map(c.navHistory.map(x=>[x.date,x.nav]));
-  list.forEach(x=>{ if(x.nav!=null && !isNaN(x.nav)) map.set(x.date, x.nav); });
+  list.forEach(x=>{
+    if(/^\d{4}-\d{2}-\d{2}$/.test(x.date) && Number.isFinite(x.nav) && x.nav>0) map.set(x.date, x.nav);
+  });
   c.navHistory = [...map.entries()].map(([date,nav])=>({date,nav})).sort((a,b)=>a.date.localeCompare(b.date));
   if(c.navHistory.length>MAX_HIST) c.navHistory = c.navHistory.slice(-MAX_HIST);
   c.lastUpdated = new Date().toISOString();
+  if(source) c.source = source;
   lsSet(navKey(h.fundCode), c);
 }
 
@@ -811,6 +1049,7 @@ function nextSched(plan, after){
 function applyRspPlans(){
   let added = 0, skipped = 0;
   holdings.forEach(h=>{
+    if(h.assetType==="stock") return;
     let changed = false;
     (h.rspPlans||[]).forEach(pl=>{
       if(pl.enabled===false || !(pl.amount>0)) return;
@@ -848,13 +1087,24 @@ async function updateFund(h, full){
     start = addDays(c.navHistory[c.navHistory.length-1].date, -7);
   }
   let ok = false;
+  if(h.assetType==="stock"){
+    try{
+      const result = await stockHistory(h.symbol||h.fundCode,"10y");
+      mergeHistory(h,result.history,result.source);
+      ok = true;
+    }catch(error){
+      console.error(`股票歷史更新失敗：${h.fundName}`,error);
+    }
+    if(h.currency!=="TWD") await ensureFx(h);
+    return ok;
+  }
   try{
     const list = await msHistory(h.fundCode, start, todayStr(), h.currency);
-    if(list.length){ mergeHistory(h, list); ok = true; }
-  }catch(e){}
+    if(list.length){ mergeHistory(h, list, apiDiagnostics.fundHistory); ok = true; }
+  }catch(e){ console.error(`基金歷史更新失敗：${h.fundName}`, e); }
   if(!ok){ // TDCC 備援（境外）
     const t = await tdccOffshoreNav(h.isin);
-    if(t && t.nav){ mergeHistory(h, [t]); ok = true; }
+    if(t && t.nav){ mergeHistory(h, [t], apiDiagnostics.tdcc); ok = true; }
   }
   if(h.currency!=="TWD") await ensureFx(h);
   return ok;
@@ -878,7 +1128,7 @@ async function updateAll(force){
   updating = false;
   $("#btnRefresh").disabled = false;
   st.textContent = "更新於 " + new Date().toLocaleTimeString("zh-TW",{hour12:false});
-  if(failCnt) toast(`⚠ ${failCnt} 支基金更新失敗，已使用快取資料`);
+  if(failCnt) toast(`⚠ ${failCnt} 筆持倉更新失敗，已使用快取資料`);
   applyRspPlans();
   renderAll(true);
 }
@@ -1009,7 +1259,7 @@ function renderTable(){
     const sel = d.h.id===selectedId?" class=\"sel\"":"";
     const dayTxt = d.dayChg!=null ? `<span class="${clsOf(d.dayChg)}">${signed(d.dayChg, d.nav>=100?2:4)}<br><span class="subTxt ${clsOf(d.dayChg)}">${signed(d.dayChgPct,2,"%")}</span></span>` : "—";
     return `<tr data-id="${d.h.id}"${sel}>
-      <td title="${esc(d.h.fundName)}">${esc(d.h.fundName)}<br><span class="subTxt">${esc(d.h.currency)}${d.h.isin?" · "+esc(d.h.isin):""}</span></td>
+      <td title="${esc(d.h.fundName)}">${d.h.assetType==="stock"?'<span class="badge LUMP">股票</span> ':""}${esc(d.h.fundName)}<br><span class="subTxt">${esc(d.h.currency)}${d.h.assetType==="stock"&&d.h.symbol?" · "+esc(d.h.symbol):(d.h.isin?" · "+esc(d.h.isin):"")}</span></td>
       <td>${fmtN(d.nav, d.nav!=null&&d.nav>=100?2:4)}</td>
       <td>${d.navDate? d.navDate.replaceAll("-","/") :"—"}</td>
       <td>${dayTxt}</td>
@@ -1023,7 +1273,8 @@ function renderTable(){
       <td><span class="rowBtns">
         <button data-act="buy" data-id="${d.h.id}" title="新增買入">＋買入</button>
         <button data-act="mng" data-id="${d.h.id}" title="管理買入記錄">管理</button>
-        <button data-act="del" data-id="${d.h.id}" title="刪除基金">🗑</button>
+        <button data-act="cmp" data-id="${d.h.id}" title="與其他基金或市場比較">比較</button>
+        <button data-act="del" data-id="${d.h.id}" title="刪除持倉">🗑</button>
       </span></td>
     </tr>`;
   }).join("");
@@ -1117,7 +1368,7 @@ function renderPortfolioChart(){
   $("#chartTitle").textContent = "📊 投資組合（TWD）";
   const [start,end] = rangeBounds();
   const s = holdings.length ? buildPortfolioSeries(start,end) : null;
-  if(!s){ hint.textContent = holdings.length ? "此區間無足夠資料（可點「⟳ 更新」抓取更多歷史）" : "尚未加入任何基金"; hint.style.display="flex"; if(chart){chart.destroy();chart=null;} return; }
+  if(!s){ hint.textContent = holdings.length ? "此區間無足夠資料（可點「⟳ 更新」抓取更多歷史）" : "尚未加入任何資產"; hint.style.display="flex"; if(chart){chart.destroy();chart=null;} return; }
   hint.style.display="none";
   const usePct = chartMode==="pct";
   const gridCol = getComputedStyle(document.body).getPropertyValue("--border").trim();
@@ -1181,12 +1432,12 @@ function renderChart(){
   const h = holdings.find(x=>x.id===selectedId);
   if(!h){
     if(holdings.length){ chartView="portfolio"; $("#btnPortfolio").classList.add("on"); return renderPortfolioChart(); }
-    hint.textContent="選擇基金以顯示走勢圖"; hint.style.display="flex"; if(chart){chart.destroy();chart=null;} $("#chartTitle").textContent="—"; return; }
+    hint.textContent="選擇資產以顯示走勢圖"; hint.style.display="flex"; if(chart){chart.destroy();chart=null;} $("#chartTitle").textContent="—"; return; }
   $("#chartTitle").textContent = h.fundName + "（"+h.currency+"）";
   const c = getCache(h);
   const [start,end] = rangeBounds();
   const data = c.navHistory.filter(x=>x.date>=start && x.date<=end);
-  if(data.length<2){ hint.textContent = c.navHistory.length ? "此區間無足夠資料（可點「更新」抓取更多歷史）" : "尚無淨值資料，請點「⟳ 更新」"; hint.style.display="flex"; if(chart){chart.destroy();chart=null;} return; }
+  if(data.length<2){ hint.textContent = c.navHistory.length ? "此區間無足夠資料（可點「更新」抓取更多歷史）" : `尚無${h.assetType==="stock"?"股價":"淨值"}資料，請點「⟳ 更新」`; hint.style.display="flex"; if(chart){chart.destroy();chart=null;} return; }
   hint.style.display="none";
 
   const base = avgNav(h);
@@ -1202,7 +1453,9 @@ function renderChart(){
     labels,
     buys,
     costLine: usePct ? (base?100:null) : base,
-    costLabel: usePct ? "持倉均價 100%" : (base? "持倉均價 "+fmtN(base, base>=100?2:4) : "")
+    costLabel: usePct
+      ? (h.assetType==="stock"?"持股均價 100%":"持倉均價 100%")
+      : (base? (h.assetType==="stock"?"持股均價 ":"持倉均價 ")+fmtN(base, base>=100?2:4) : "")
   };
   const gridCol = getComputedStyle(document.body).getPropertyValue("--border").trim();
   const txtCol = getComputedStyle(document.body).getPropertyValue("--muted").trim();
@@ -1226,9 +1479,11 @@ function renderChart(){
             title: items=>items[0].label,
             label: item=>{
               const i=item.dataIndex, nav=data[i].nav;
-              const lines = ["淨值 "+fmtN(nav, nav>=100?2:4)+" "+h.currency];
+              const valueName = h.assetType==="stock" ? "股價" : "淨值";
+              const averageName = h.assetType==="stock" ? "平均成本" : "均價";
+              const lines = [valueName+" "+fmtN(nav, nav>=100?2:4)+" "+h.currency];
               if(baseline) lines.push("相對均價 "+signed(nav/ (base||baseline) *100-100,2,"%"));
-              if(base) lines.push("均價差 "+signed(nav-base, base>=100?2:4));
+              if(base) lines.push(averageName+"差 "+signed(nav-base, base>=100?2:4));
               return lines;
             }
           }
@@ -1317,7 +1572,7 @@ async function confirmAdd(){
   if(!(units>0)){ toast("請輸入買入金額或單位數"); return; }
   let h = holdings.find(x=>x.fundCode===picked.secId);
   if(!h){
-    h = {id:uid("holding"), fundCode:picked.secId, fundName:picked.name, currency:picked.currency, isin:picked.isin, purchases:[], dividends:[], rspPlans:[]};
+    h = {id:uid("holding"), assetType:"fund", fundCode:picked.secId, fundName:picked.name, currency:picked.currency, isin:picked.isin, purchases:[], dividends:[], rspPlans:[]};
     holdings.push(h);
   }
   h.purchases.push({purchaseId:uid("p"), type:document.querySelector("input[name=pType]:checked").value,
@@ -1332,13 +1587,124 @@ async function confirmAdd(){
   updateFund(h).then(()=>renderAll());
 }
 
+/* ---------------- 新增股票 / ETF ---------------- */
+let stockSearchTimer = null;
+function openStock(){
+  pickedStock = null;
+  $("#stockStep1").hidden = false;
+  $("#stockStep2").hidden = true;
+  $("#btnStockConfirm").hidden = true;
+  $("#btnStockBack").hidden = true;
+  $("#stockSearchInput").value = "";
+  $("#stockSearchStatus").textContent = "";
+  $("#stockSearchResults").hidden = true;
+  $("#dlgStock").showModal();
+  setTimeout(()=>$("#stockSearchInput").focus(),60);
+}
+
+async function doStockSearch(){
+  const term = $("#stockSearchInput").value.trim();
+  const box = $("#stockSearchResults"), status = $("#stockSearchStatus");
+  if(!term){ box.hidden=true; status.textContent=""; return; }
+  status.innerHTML = '<span class="spin"></span> 搜尋股票與 ETF…';
+  try{
+    const rows = await assetSearch(term);
+    status.textContent = rows.length ? `找到 ${rows.length} 筆` : "查無結果，請確認代碼";
+    box.hidden = !rows.length;
+    box.innerHTML = rows.map((row,index)=>`<div class="sr-item" data-stock-i="${index}">
+      <div><div class="nm">${esc(row.name)}</div><div class="meta">${esc(row.symbol)} · ${row.quoteType==="ETF"?"ETF":"股票"} · ${esc(row.exchangeDisplay||row.exchange||"")}</div></div>
+      <div class="px">${marketPriceText(row.quote.price)} ${esc(row.quote.currency||"")}<br><span class="meta">${dataSourceLabel(row.quote.source)}</span></div>
+    </div>`).join("");
+    box._rows = rows;
+  }catch(error){
+    status.textContent = "搜尋失敗："+error.message;
+    box.hidden = true;
+  }
+}
+
+function pickStock(row){
+  pickedStock = row;
+  $("#stockStep1").hidden = true;
+  $("#stockStep2").hidden = false;
+  $("#btnStockConfirm").hidden = false;
+  $("#btnStockBack").hidden = false;
+  $("#pickedStock").textContent = `${row.name}（${row.symbol} · ${row.quote.currency||""}）目前每股 ${marketPriceText(row.quote.price)}`;
+  $("#stockDate").value = row.quote.marketTime ? new Date(row.quote.marketTime*1000).toISOString().slice(0,10) : todayStr();
+  $("#stockShares").value = "";
+  $("#stockPrice").value = row.quote.price;
+  $("#stockFee").value = "";
+  $("#stockNote").value = "";
+  updateStockTotal();
+}
+
+function updateStockTotal(){
+  const shares = parseFloat($("#stockShares").value);
+  const price = parseFloat($("#stockPrice").value);
+  const fee = parseFloat($("#stockFee").value)||0;
+  $("#stockTotal").value = shares>0 && price>0 ? fmtN(shares*price+fee,2)+" "+(pickedStock?.quote?.currency||"") : "";
+}
+
+async function confirmStock(){
+  if(!pickedStock) return;
+  const shares = parseFloat($("#stockShares").value);
+  const price = parseFloat($("#stockPrice").value);
+  const fee = parseFloat($("#stockFee").value)||0;
+  if(!(shares>0)){ toast("請輸入股數"); return; }
+  if(!(price>0)){ toast("請輸入每股成交價"); return; }
+  if(fee<0){ toast("手續費不可為負數"); return; }
+  let h = holdings.find(item=>item.assetType==="stock" && item.symbol===pickedStock.symbol);
+  if(!h){
+    h = {
+      id:uid("holding"),
+      assetType:"stock",
+      symbol:pickedStock.symbol,
+      fundCode:pickedStock.symbol,
+      fundName:pickedStock.name,
+      currency:pickedStock.quote.currency||"USD",
+      isin:"",
+      exchange:pickedStock.exchange||"",
+      quoteType:pickedStock.quoteType,
+      purchases:[],
+      dividends:[],
+      rspPlans:[]
+    };
+    holdings.push(h);
+  }
+  h.purchases.push({
+    purchaseId:uid("p"),
+    type:"LUMP",
+    date:$("#stockDate").value||todayStr(),
+    units:shares,
+    navAtPurchase:price,
+    amount:+(shares*price).toFixed(6),
+    fee:fee>0?fee:0,
+    note:$("#stockNote").value.trim()
+  });
+  h.purchases.sort((a,b)=>b.date.localeCompare(a.date));
+  lsSet(LS_H,holdings);
+  selectedId = h.id;
+  $("#dlgStock").close();
+  renderAll();
+  toast(`已加入 ${pickedStock.symbol} · ${fmtN(shares,4)} 股`);
+  await updateFund(h,true);
+  renderAll();
+}
+
 /* ---------------- 買入記錄管理 ---------------- */
 function openMng(id){
   mngHoldingId = id; editPurId = null; editDivId = null;
   const h = holdings.find(x=>x.id===id); if(!h) return;
   $("#mngTitle").textContent = h.fundName;
+  $("#purTable thead").innerHTML = h.assetType==="stock"
+    ? "<tr><th>類型</th><th>日期</th><th>成交金額</th><th>股數</th><th>每股成交價</th><th>備註</th><th></th></tr>"
+    : "<tr><th>類型</th><th>日期</th><th>金額</th><th>單位數</th><th>買入淨值</th><th>備註</th><th></th></tr>";
+  $("#eAmtLabel").textContent = h.assetType==="stock" ? "成交金額（自動計算）" : "買入金額（計價幣別）";
+  $("#eUnitsLabel").textContent = h.assetType==="stock" ? "股數" : "買入單位數";
+  $("#eNavLabel").textContent = h.assetType==="stock" ? "每股成交價" : "買入淨值";
+  $("#btnENavLookup").hidden = h.assetType==="stock";
   $("#purEdit").hidden = true;
   $("#divEdit").hidden = true;
+  $("#rspSection").hidden = h.assetType==="stock";
   renderPurTable(); renderDivTable(); renderRspList();
   $("#rspStart").value = todayStr();
   $("#dlgMng").showModal();
@@ -1350,7 +1716,7 @@ function renderPurTable(){
     const amtTxt = (p.amount!=null&&p.amount>0) ? fmtN(+p.amount,0) : fmtN((+p.units||0)*(+p.navAtPurchase||0),0);
     const feeTxt = (+p.fee>0) ? `<br><span class="subTxt">費 ${fmtN(+p.fee,0)}</span>` : "";
     return `<tr>
-    <td><span class="badge ${p.type}">${p.type==="RSP"?"定期":"單筆"}</span></td>
+    <td><span class="badge ${p.type}">${h.assetType==="stock"?"股票":(p.type==="RSP"?"定期":"單筆")}</span></td>
     <td>${esc(p.date)}</td><td>${amtTxt}${feeTxt}</td><td>${fmtN(+p.units,4)}</td><td>${fmtN(+p.navAtPurchase, p.navAtPurchase>=100?2:4)}</td>
     <td style="max-width:110px;overflow:hidden;text-overflow:ellipsis" title="${esc(p.note)}">${esc(p.note||"")}</td>
     <td class="act"><button data-pedit="${p.purchaseId}" title="編輯">✏️</button><button data-pdel="${p.purchaseId}" title="刪除">🗑️</button></td>
@@ -1370,6 +1736,7 @@ function renderDivTable(){
 }
 function renderRspList(){
   const h = holdings.find(x=>x.id===mngHoldingId); if(!h) return;
+  if(h.assetType==="stock"){ $("#rspList").innerHTML='<div class="subTxt">股票不使用基金淨值定期定額排程；可用「新增買入記錄」手動加碼。</div>'; return; }
   const plans = h.rspPlans||[];
   $("#rspList").innerHTML = plans.length ? plans.map(pl=>`<div class="planRow${pl.enabled===false?" off":""}">
     <span>每月 <b>${pl.dayOfMonth}</b> 日 · ${fmtN(+pl.amount,0)} ${esc(h.currency)}${pl.fee>0?`（費 ${fmtN(+pl.fee,0)}）`:""} · 自 ${esc(pl.startDate)}${pl.lastApplied?` · 已扣至 ${esc(pl.lastApplied)}`:""}</span>
@@ -1382,17 +1749,33 @@ function renderRspList(){
 function openPurEdit(pid){
   editPurId = pid;
   const h = holdings.find(x=>x.id===mngHoldingId);
+  if(!h) return;
   const p = pid ? h.purchases.find(x=>x.purchaseId===pid) : null;
+  const isStock = h.assetType==="stock";
   $("#purEditTitle").textContent = p ? "編輯記錄" : "新增記錄";
-  document.querySelector(`input[name=eType][value=${p?p.type:"RSP"}]`).checked = true;
+  document.querySelector(`input[name=eType][value=${isStock?"LUMP":(p?p.type:"RSP")}]`).checked = true;
+  document.querySelectorAll("input[name=eType]").forEach(input=>input.disabled=isStock);
+  $("#eAmtLabel").textContent = isStock ? "成交金額（自動計算）" : "買入金額（計價幣別）";
+  $("#eUnitsLabel").textContent = isStock ? "股數" : "買入單位數";
+  $("#eNavLabel").textContent = isStock ? "每股成交價" : "買入淨值";
+  $("#btnENavLookup").hidden = isStock;
+  $("#eAmt").readOnly = isStock;
   $("#eDate").value = p?p.date:todayStr();
   $("#eUnits").value = p?p.units:"";
-  $("#eAmt").value = (p&&p.amount!=null)?p.amount:"";
+  $("#eAmt").value = p ? ((p.amount!=null)?p.amount:(+p.units||0)*(+p.navAtPurchase||0)) : "";
   $("#eFee").value = (p&&p.fee)?p.fee:"";
   $("#eNav").value = p?p.navAtPurchase:"";
   $("#eNote").value = p?(p.note||""):"";
   $("#purEdit").hidden = false;
-  $("#eAmt").focus();
+  if(isStock) syncStockEditAmount();
+  (isStock?$("#eUnits"):$("#eAmt")).focus();
+}
+function syncStockEditAmount(){
+  const h = holdings.find(x=>x.id===mngHoldingId);
+  if(!h || h.assetType!=="stock") return;
+  const units = parseFloat($("#eUnits").value);
+  const price = parseFloat($("#eNav").value);
+  $("#eAmt").value = units>0 && price>0 ? +(units*price).toFixed(6) : "";
 }
 function savePur(){
   const h = holdings.find(x=>x.id===mngHoldingId); if(!h) return;
@@ -1400,9 +1783,10 @@ function savePur(){
   const amt = parseFloat($("#eAmt").value), fee = parseFloat($("#eFee").value)||0;
   if(amt>0 && nav>0 && !$("#eUnits").value) syncUnits($("#eAmt"), $("#eNav"), $("#eUnits"));
   const units = parseFloat($("#eUnits").value);
-  if(!(units>0)||!(nav>0)){ toast("淨值與（金額或單位數）需大於 0"); return; }
-  const obj = {type:document.querySelector("input[name=eType]:checked").value, date:$("#eDate").value||todayStr(), units, navAtPurchase:nav,
-    amount:(amt>0?amt:null), fee:(fee>0?fee:0), note:$("#eNote").value.trim()};
+  if(!(units>0)||!(nav>0)){ toast(h.assetType==="stock"?"股數與每股成交價需大於 0":"淨值與（金額或單位數）需大於 0"); return; }
+  const principal = h.assetType==="stock" ? units*nav : amt;
+  const obj = {type:h.assetType==="stock"?"LUMP":document.querySelector("input[name=eType]:checked").value, date:$("#eDate").value||todayStr(), units, navAtPurchase:nav,
+    amount:(principal>0?principal:null), fee:(fee>0?fee:0), note:$("#eNote").value.trim()};
   if(editPurId){
     const p = h.purchases.find(x=>x.purchaseId===editPurId); Object.assign(p,obj);
   }else{
@@ -1438,7 +1822,15 @@ function doImport(file){
       if(d.navCaches){ Object.entries(d.navCaches).forEach(([k,v])=>lsSet(NAV_PREFIX+k,v)); }
       selectedId = holdings.length?holdings[0].id:null;
       normalizeHoldings();
-      renderAll(); toast("匯入成功："+holdings.length+" 支基金");
+      compareFundIds = Array.isArray(settings.compareFundIds)
+        ? settings.compareFundIds.filter(id=>holdings.some(h=>h.id===id)).slice(0,MAX_COMPARE)
+        : [];
+      marketSelection = Array.isArray(settings.marketSymbols)
+        ? settings.marketSymbols.filter(symbol=>MARKET_INDICES.some(item=>item.symbol===symbol)).slice(0,MAX_COMPARE)
+        : ["^TWII","^GSPC","^IXIC"];
+      while(compareSelectionCount()>MAX_COMPARE) marketSelection.pop();
+      marketRange = MARKET_RANGES.some(([,value])=>value===settings.marketRange) ? settings.marketRange : "1y";
+      renderAll(); toast("匯入成功："+holdings.length+" 筆持倉");
     }catch(e){ toast("匯入失敗："+e.message); }
   };
   rd.readAsText(file);
@@ -1564,7 +1956,7 @@ async function processCsvText(text){
   for(const g of groups.values()){
     gi++;
     st.innerHTML = `<span class="spin"></span> 比對基金 ${gi}/${groups.size}：${esc(g.key)}…`;
-    const ex = holdings.find(h=>h.isin===g.key || h.fundCode===g.key || h.fundName===g.key);
+    const ex = holdings.find(h=>h.assetType!=="stock" && (h.isin===g.key || h.fundCode===g.key || h.fundName===g.key));
     if(ex){ g.holding = ex; g.candidates = [{secId:ex.fundCode, name:ex.fundName, currency:ex.currency, isin:ex.isin||""}]; continue; }
     try{
       const found = await msSearch(g.key);
@@ -1633,7 +2025,7 @@ async function processFundrichCsv(rows, H){
   for(const g of groups.values()){
     gi++;
     st.innerHTML = `<span class="spin"></span> 比對基金 ${gi}/${groups.size}：${esc(g.key)}…`;
-    const ex = holdings.find(h=>h.fundName===g.key || h.fundName===g.rawName);
+    const ex = holdings.find(h=>h.assetType!=="stock" && (h.fundName===g.key || h.fundName===g.rawName));
     if(ex){ g.holding = ex; g.candidates = [{secId:ex.fundCode, name:ex.fundName, currency:ex.currency, isin:ex.isin||""}]; continue; }
     // 漸進式關鍵字搜尋：全名 → 去「證券投資信託」→ 去級別後綴 → 去「基金」字尾
     const norm = g.key.replace(/[—－–]/g,"-");   // 全形/長破折號 → 半形
@@ -1677,7 +2069,7 @@ async function fillCsvNavs(){
       st.innerHTML = `<span class="spin"></span> 查詢 ${esc(cand.name)} 歷史淨值…`;
       try{
         g.hist = await msHistory(cand.secId, addDays(ds[0],-1), addDays(ds[ds.length-1],8), cand.currency);
-      }catch(err){ g.hist = null; }
+      }catch(err){ console.error(`CSV 淨值查詢失敗：${cand.name}`,err); g.hist = null; }
     }
     purRows.forEach(e=>{
       if(!(e.nav>0)){
@@ -1766,9 +2158,9 @@ async function confirmCsvImport(){
   entries.filter(e=>e.status==="ok").forEach(e=>{
     const g = groups.get(e.key);
     const c = g.candidates[g.chosen];
-    let h = g.holding || holdings.find(x=>x.fundCode===c.secId);
+    let h = g.holding || holdings.find(x=>x.assetType!=="stock" && x.fundCode===c.secId);
     if(!h){
-      h = {id:uid("holding"), fundCode:c.secId, fundName:c.name, currency:c.currency, isin:c.isin||"", purchases:[], dividends:[], rspPlans:[]};
+      h = {id:uid("holding"), assetType:"fund", fundCode:c.secId, fundName:c.name, currency:c.currency, isin:c.isin||"", purchases:[], dividends:[], rspPlans:[]};
       holdings.push(h); newHoldings.push(h);
       g.holding = h;
     }
@@ -1801,7 +2193,7 @@ function buildFrCsv(){
   const n2 = v => v==null||isNaN(v) ? "--" : q((+v).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}));
   const pc = v => v==null||isNaN(v) ? "--" : (+v).toFixed(2);
   const header = "基金代碼,基金名稱,投資本金,庫存單位數,可贖回單位數,參考市值（幣別）,參考市值,參考損益（幣別）,參考損益(含息含手續費),參考損益(含息不含手續費),參考損益(不含息含手續費),參考損益(不含息不含手續費),報酬率(含息含手續費),報酬率(含息不含手續費),報酬率(不含息含手續費),報酬率(不含息不含手續費),計價幣別,最新淨值（幣別）,最新淨值,淨值日期,交易幣別,累積配息金額（幣別）,累積配息金額,參考匯率,平均申購淨值（幣別）,平均申購淨值,台幣本金(不含息不含手續費)";
-  const lines = holdings.map(h=>{
+  const lines = holdings.filter(h=>h.assetType!=="stock").map(h=>{
     const l = latest(h), units = totUnits(h);
     const principal = h.purchases.reduce((s,p)=>s+((p.amount!=null&&+p.amount>0)?+p.amount:(+p.units||0)*(+p.navAtPurchase||0)),0);
     const fees = h.purchases.reduce((s,p)=>s+(+p.fee||0),0);
@@ -1825,7 +2217,7 @@ function buildFrCsv(){
   return "﻿"+header+"\r\n"+lines.join("\r\n")+"\r\n";
 }
 function frExportCsv(){
-  if(!holdings.length){ toast("尚無持有基金可匯出"); return; }
+  if(!holdings.some(h=>h.assetType!=="stock")){ toast("尚無持有基金可匯出"); return; }
   const blob = new Blob([buildFrCsv()],{type:"text/csv;charset=utf-8"});
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -1836,7 +2228,9 @@ function frExportCsv(){
 
 /* ---------------- 事件 ---------------- */
 $("#btnAdd").onclick = openAdd;
+$("#btnAddStock").onclick = openStock;
 $("#btnRefresh").onclick = ()=>updateAll(false);
+$("#btnCompare").onclick = ()=>openMarketDialog();
 $("#btnExport").onclick = doExport;
 $("#btnImport").onclick = ()=>$("#importFile").click();
 $("#importFile").onchange = e=>{ if(e.target.files[0]) doImport(e.target.files[0]); e.target.value=""; };
@@ -1862,21 +2256,30 @@ $("#marketPicker").onchange = event=>{
   if(!input) return;
   const symbol = input.dataset.marketPick;
   if(input.checked){
-    if(marketSelection.length>=4){
+    if(!addCompareSelection("market",symbol)){
       input.checked = false;
-      toast("最多同時比較 4 個市場");
       return;
     }
-    marketSelection.push(symbol);
   }else{
-    if(marketSelection.length<=1){
-      input.checked = true;
-      toast("至少保留 1 個市場");
+    marketSelection = marketSelection.filter(value=>value!==symbol);
+    persistMarketSettings();
+  }
+  renderMarketControls();
+  loadMarketHistory(false);
+};
+$("#fundPicker").onchange = event=>{
+  const input = event.target.closest("input[data-fund-pick]");
+  if(!input) return;
+  const id = input.dataset.fundPick;
+  if(input.checked){
+    if(!addCompareSelection("fund",id)){
+      input.checked = false;
       return;
     }
-    marketSelection = marketSelection.filter(value=>value!==symbol);
+  }else{
+    compareFundIds = compareFundIds.filter(value=>value!==id);
+    persistMarketSettings();
   }
-  persistMarketSettings();
   renderMarketControls();
   loadMarketHistory(false);
 };
@@ -1907,20 +2310,44 @@ $("#btnBackSearch").onclick = ()=>{
 };
 $("#btnNavLookup").onclick = ()=>{ if(picked) navLookup(picked.secId, picked.currency, $("#pDate").value, $("#pNav"), $("#btnNavLookup")); };
 $("#btnConfirmAdd").onclick = confirmAdd;
+$("#stockSearchInput").addEventListener("input", ()=>{ clearTimeout(stockSearchTimer); stockSearchTimer=setTimeout(doStockSearch,450); });
+$("#stockSearchInput").addEventListener("keydown", event=>{
+  if(event.key==="Enter"){ event.preventDefault(); clearTimeout(stockSearchTimer); doStockSearch(); }
+});
+$("#stockSearchResults").onclick = event=>{
+  const item = event.target.closest("[data-stock-i]");
+  if(!item) return;
+  const row = $("#stockSearchResults")._rows?.[+item.dataset.stockI];
+  if(row) pickStock(row);
+};
+$("#btnStockBack").onclick = ()=>{
+  pickedStock = null;
+  $("#stockStep1").hidden = false;
+  $("#stockStep2").hidden = true;
+  $("#btnStockConfirm").hidden = true;
+  $("#btnStockBack").hidden = true;
+  $("#stockSearchInput").focus();
+};
+["#stockShares","#stockPrice","#stockFee"].forEach(selector=>$(selector).addEventListener("input",updateStockTotal));
+$("#btnStockConfirm").onclick = confirmStock;
 
 $("#tbody").onclick = e=>{
   const btn = e.target.closest("button[data-act]");
   if(btn){
     const id = btn.dataset.id, h = holdings.find(x=>x.id===id);
     if(btn.dataset.act==="del"){
-      if(confirm(`確定刪除「${h.fundName}」及其所有買入記錄？`)){
+      if(confirm(`確定刪除「${h.fundName}」及其所有交易記錄？`)){
         holdings = holdings.filter(x=>x.id!==id);
-        try{ localStorage.removeItem(NAV_PREFIX+h.fundCode); }catch(_){}
+        try{ localStorage.removeItem(NAV_PREFIX+h.fundCode); }
+        catch(error){ console.warn(`刪除快取失敗：${h.fundCode}`,error); }
+        compareFundIds = compareFundIds.filter(value=>value!==id);
+        persistMarketSettings();
         if(selectedId===id) selectedId = holdings.length?holdings[0].id:null;
         lsSet(LS_H,holdings); renderAll();
       }
     }else if(btn.dataset.act==="mng"){ openMng(id); }
     else if(btn.dataset.act==="buy"){ openMng(id); openPurEdit(null); }
+    else if(btn.dataset.act==="cmp"){ openMarketDialog(null,id); }
     return;
   }
   const tr = e.target.closest("tr[data-id]");
@@ -1978,7 +2405,12 @@ $("#btnPurSave").onclick = savePur;
 $("#pAmt").addEventListener("input", ()=>syncUnits($("#pAmt"), $("#pNav"), $("#pUnits")));
 $("#pNav").addEventListener("input", ()=>{ if(parseFloat($("#pAmt").value)>0) syncUnits($("#pAmt"), $("#pNav"), $("#pUnits")); });
 $("#eAmt").addEventListener("input", ()=>syncUnits($("#eAmt"), $("#eNav"), $("#eUnits")));
-$("#eNav").addEventListener("input", ()=>{ if(parseFloat($("#eAmt").value)>0) syncUnits($("#eAmt"), $("#eNav"), $("#eUnits")); });
+$("#eUnits").addEventListener("input", syncStockEditAmount);
+$("#eNav").addEventListener("input", ()=>{
+  const h = holdings.find(x=>x.id===mngHoldingId);
+  if(h?.assetType==="stock") syncStockEditAmount();
+  else if(parseFloat($("#eAmt").value)>0) syncUnits($("#eAmt"), $("#eNav"), $("#eUnits"));
+});
 
 /* 配息記錄 */
 function openDivEdit(did){
@@ -2024,6 +2456,7 @@ $("#divBody").onclick = e=>{
 /* 定期定額排程 */
 $("#btnRspAdd").onclick = ()=>{
   const h = holdings.find(x=>x.id===mngHoldingId); if(!h) return;
+  if(h.assetType==="stock"){ toast("股票請使用新增買入記錄加碼"); return; }
   const day = parseInt($("#rspDay").value,10), amt = parseFloat($("#rspAmt").value), fee = parseFloat($("#rspFee").value)||0;
   const start = $("#rspStart").value;
   if(!(day>=1&&day<=31)){ toast("扣款日需為 1–31"); return; }
@@ -2055,7 +2488,7 @@ $("#rspList").onclick = e=>{
 };
 $("#btnENavLookup").onclick = ()=>{
   const h = holdings.find(x=>x.id===mngHoldingId);
-  if(h) navLookup(h.fundCode, h.currency, $("#eDate").value, $("#eNav"), $("#btnENavLookup"));
+  if(h && h.assetType!=="stock") navLookup(h.fundCode, h.currency, $("#eDate").value, $("#eNav"), $("#btnENavLookup"));
 };
 $("#purBody").onclick = e=>{
   const ed = e.target.closest("button[data-pedit]"), dl = e.target.closest("button[data-pdel]");
@@ -2082,16 +2515,20 @@ window.addEventListener("resize", ()=>{ if(chart) chart.resize(); if(marketChart
     link.href="data:application/manifest+json,"+encodeURIComponent(JSON.stringify(manifest));
     document.head.appendChild(link);
     if("serviceWorker" in navigator && (location.protocol==="https:" || location.hostname==="localhost")){
-      navigator.serviceWorker.register("./sw.js").catch(()=>{});
+      navigator.serviceWorker.register("./sw.js").catch(error=>console.warn("Service Worker 註冊失敗",error));
     }
-  }catch(e){}
+  }catch(e){
+    console.warn("PWA 初始化失敗",e);
+  }
 })();
 
 /* ---------------- 啟動 ---------------- */
 (function init(){
   document.body.dataset.theme = settings.theme||"light";
-  marketSelection = marketSelection.filter(symbol=>MARKET_INDICES.some(item=>item.symbol===symbol)).slice(0,4);
-  if(!marketSelection.length) marketSelection = ["^TWII","^GSPC","^IXIC"];
+  compareFundIds = compareFundIds.filter(id=>holdings.some(h=>h.id===id)).slice(0,MAX_COMPARE);
+  marketSelection = marketSelection.filter(symbol=>MARKET_INDICES.some(item=>item.symbol===symbol)).slice(0,MAX_COMPARE);
+  while(compareSelectionCount()>MAX_COMPARE) marketSelection.pop();
+  if(!compareSelectionCount()) marketSelection = ["^TWII","^GSPC","^IXIC"];
   curRange = settings.defaultChartRange||"3M";
   if(!RANGES.some(r=>r[0]===curRange)) curRange="3M";
   if(holdings.length) selectedId = holdings[0].id;

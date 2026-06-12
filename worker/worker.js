@@ -1,6 +1,24 @@
-const YAHOO_CHART_BASE = "https://query1.finance.yahoo.com/v8/finance/chart";
+const YAHOO_BASES = [
+  { url: "https://query1.finance.yahoo.com/v8/finance/chart", name: "yahoo-query1" },
+  { url: "https://query2.finance.yahoo.com/v8/finance/chart", name: "yahoo-query2" },
+];
+const YAHOO_SEARCH_BASES = [
+  { url: "https://query1.finance.yahoo.com/v1/finance/search", name: "yahoo-search-query1" },
+  { url: "https://query2.finance.yahoo.com/v1/finance/search", name: "yahoo-search-query2" },
+];
+const TWSE_INDEX_URL = "https://openapi.twse.com.tw/v1/exchangeReport/MI_INDEX";
+const TWSE_HISTORY_URL = "https://openapi.twse.com.tw/v1/exchangeReport/MI_5MINS_HIST";
+const TWSE_STOCK_DAILY_URL = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL";
+const MORNINGSTAR_BASE = "https://lt.morningstar.com/api/rest.svc";
+const MORNINGSTAR_TOKEN = "9vehuxllxs";
+const MORNINGSTAR_UNIVERSE = "FOTWN$$ALL";
+const TDCC_OFFSHORE_URL = "https://openapi.tdcc.com.tw/v1/opendata/3-4";
 const MAX_SYMBOLS = 20;
 const SYMBOL_PATTERN = /^[A-Za-z0-9^=.\-]{1,32}$/;
+const FUND_ID_PATTERN = /^[A-Za-z0-9]{1,32}$/;
+const CURRENCY_PATTERN = /^[A-Z]{3}$/;
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const ISIN_PATTERN = /^[A-Z]{2}[A-Z0-9]{9}\d$/;
 const ALLOWED_RANGES = new Set([
   "1d",
   "5d",
@@ -15,6 +33,8 @@ const ALLOWED_RANGES = new Set([
   "max",
 ]);
 const ALLOWED_INTERVALS = new Set(["1d", "1wk", "1mo"]);
+const TWSE_FALLBACK_RANGES = new Set(["1d", "5d", "1mo"]);
+const KV_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -29,7 +49,7 @@ const SECURITY_HEADERS = {
 };
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
@@ -42,19 +62,31 @@ export default {
 
     try {
       if (requestUrl.pathname === "/health") {
-        return jsonResponse({
-          status: "ok",
-          service: "fund-tracker-market-api",
-          version: 2,
-        });
+        return await handleHealth(requestUrl, env);
       }
 
       if (requestUrl.pathname === "/api/yahoo/quotes") {
-        return await handleQuotes(requestUrl);
+        return await handleQuotes(requestUrl, env);
       }
 
       if (requestUrl.pathname === "/api/yahoo/chart") {
-        return await handleChart(requestUrl);
+        return await handleChart(requestUrl, env);
+      }
+
+      if (requestUrl.pathname === "/api/assets/search") {
+        return await handleAssetSearch(requestUrl, env);
+      }
+
+      if (requestUrl.pathname === "/api/funds/search") {
+        return await handleFundSearch(requestUrl, env);
+      }
+
+      if (requestUrl.pathname === "/api/funds/history") {
+        return await handleFundHistory(requestUrl, env);
+      }
+
+      if (requestUrl.pathname === "/api/funds/tdcc") {
+        return await handleTdccNav(requestUrl, env);
       }
 
       return jsonResponse({ error: "Not found" }, 404);
@@ -72,32 +104,284 @@ export default {
   },
 };
 
-async function handleQuotes(requestUrl) {
+async function handleHealth(requestUrl, env) {
+  const base = {
+    status: "ok",
+    service: "fund-tracker-market-api",
+    version: 4,
+    cloudflareProxy: true,
+    kvConfigured: Boolean(env.MARKET_CACHE),
+    fallbackOrder: ["yahoo-query1", "yahoo-query2", "twse-for-taiwan", "cloudflare-kv-stale"],
+    fundRoutes: ["morningstar-search", "morningstar-history", "tdcc-offshore"],
+    assetRoutes: ["yahoo-search", "yahoo-chart"],
+  };
+
+  if (requestUrl.searchParams.get("deep") !== "1") {
+    return jsonResponse(base);
+  }
+
+  const checks = await Promise.all([
+    probeSource("yahoo-query1", () => fetchYahooFromBase(YAHOO_BASES[0], "^GSPC", "5d", "1d", 60)),
+    probeSource("yahoo-query2", () => fetchYahooFromBase(YAHOO_BASES[1], "^GSPC", "5d", "1d", 60)),
+    probeSource("twse", fetchTwseQuote),
+    probeSource("twse-stock", () => fetchTwseStockQuote("2330.TW")),
+    probeSource("yahoo-search", () => fetchYahooSearch("2330.TW")),
+    probeSource("morningstar", probeMorningstar),
+    probeSource("cloudflare-kv", () => probeKv(env)),
+  ]);
+  const healthy = checks.filter((check) => check.ok).length;
+
+  return jsonResponse({
+    ...base,
+    status: healthy >= 2 ? "ok" : healthy === 1 ? "degraded" : "down",
+    checkedAt: new Date().toISOString(),
+    checks,
+  }, healthy ? 200 : 503);
+}
+
+async function handleAssetSearch(requestUrl, env) {
+  const rawQuery = String(requestUrl.searchParams.get("q") || "").trim();
+  if (rawQuery.length < 1 || rawQuery.length > 60) {
+    throw new HttpError(400, "q length must be 1-60 characters");
+  }
+  const queries = normalizeAssetQueries(rawQuery);
+  const cacheKey = `asset-search:v4:${encodeURIComponent(rawQuery.toLowerCase())}`;
+  const attempts = [];
+
+  for (const query of queries) {
+    try {
+      const search = await fetchYahooSearch(query, attempts);
+      if (search.quotes.length === 0) continue;
+      const quotes = await enrichTwseNames(search.quotes);
+      const result = {
+        query,
+        quotes,
+        source: `${search.source}-via-cloudflare`,
+        stale: false,
+        attempts,
+        fetchedAt: new Date().toISOString(),
+      };
+      await putCache(env, cacheKey, result);
+      return jsonResponse(result, 200, "public, max-age=60, s-maxage=600");
+    } catch (error) {
+      attempts.push(`${query}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  const cached = await getCache(env, cacheKey);
+  if (cached?.quotes?.length) {
+    return jsonResponse({
+      ...cached,
+      source: `cloudflare-kv:${cached.source || "yahoo-search"}`,
+      stale: true,
+      attempts,
+    });
+  }
+
+  throw new Error(attempts.at(-1) || "No matching stocks or ETFs");
+}
+
+async function fetchYahooSearch(query, attempts = []) {
+  for (const base of YAHOO_SEARCH_BASES) {
+    try {
+      const url = new URL(base.url);
+      url.searchParams.set("q", query);
+      url.searchParams.set("quotesCount", "12");
+      url.searchParams.set("newsCount", "0");
+      url.searchParams.set("lang", "zh-TW");
+      url.searchParams.set("region", "TW");
+      const response = await fetch(url, {
+        headers: yahooHeaders(),
+        cf: { cacheEverything: true, cacheTtl: 600 },
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      const supportedTypes = new Set(["EQUITY", "ETF"]);
+      const quotes = (payload.quotes || [])
+        .filter((quote) => supportedTypes.has(quote.quoteType) && SYMBOL_PATTERN.test(quote.symbol || ""))
+        .map((quote) => ({
+          symbol: quote.symbol,
+          name: quote.shortname || quote.longname || quote.symbol,
+          shortName: quote.shortname || quote.longname || quote.symbol,
+          quoteType: quote.quoteType,
+          exchange: quote.exchange || null,
+          exchangeDisplay: quote.exchDisp || null,
+        }));
+      if (quotes.length === 0) {
+        attempts.push(`${base.name}: no matching assets`);
+        continue;
+      }
+      return { quotes, source: base.name };
+    } catch (error) {
+      attempts.push(`${base.name}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  throw new Error("Yahoo search providers unavailable");
+}
+
+async function enrichTwseNames(quotes) {
+  const twseCodes = new Set(
+    quotes
+      .map((quote) => quote.symbol.match(/^(\d{4,6})\.TW$/)?.[1])
+      .filter(Boolean),
+  );
+  if (twseCodes.size === 0) return quotes;
+
+  try {
+    const response = await fetch(TWSE_STOCK_DAILY_URL, {
+      headers: {
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; FundTrackerMarketAPI/4.0)",
+      },
+      cf: { cacheEverything: true, cacheTtl: 300 },
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const rows = await response.json();
+    const names = new Map(
+      rows
+        .filter((row) => twseCodes.has(row.Code) && String(row.Name || "").trim())
+        .map((row) => [row.Code, String(row.Name).trim()]),
+    );
+    return quotes.map((quote) => {
+      const code = quote.symbol.match(/^(\d{4,6})\.TW$/)?.[1];
+      return code && names.has(code) ? { ...quote, name: names.get(code) } : quote;
+    });
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "twse_name_enrichment_failed",
+      message: error instanceof Error ? error.message : String(error),
+    }));
+    return quotes;
+  }
+}
+
+async function probeMorningstar() {
+  const url = buildMorningstarSearchUrl("統一奔騰", 1);
+  const response = await fetch(url, {
+    headers: upstreamJsonHeaders(),
+    cf: { cacheEverything: true, cacheTtl: 300 },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const payload = await response.json();
+  if (!Array.isArray(payload.rows) || payload.rows.length === 0) {
+    throw new Error("Morningstar returned no rows");
+  }
+}
+
+async function probeKv(env) {
+  if (!env.MARKET_CACHE) throw new Error("KV binding missing");
+  const key = `health:${crypto.randomUUID()}`;
+  const value = { ok: true, createdAt: new Date().toISOString() };
+  await env.MARKET_CACHE.put(key, JSON.stringify(value), { expirationTtl: 60 });
+  const restored = await env.MARKET_CACHE.get(key, "json");
+  await env.MARKET_CACHE.delete(key);
+  if (!restored?.ok) throw new Error("KV round-trip failed");
+}
+
+async function probeSource(name, operation) {
+  const startedAt = Date.now();
+  try {
+    await operation();
+    return { name, ok: true, latencyMs: Date.now() - startedAt };
+  } catch (error) {
+    return {
+      name,
+      ok: false,
+      latencyMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function handleQuotes(requestUrl, env) {
   const symbols = parseSymbols(requestUrl.searchParams.get("symbols"));
   const settled = await Promise.allSettled(
-    symbols.map((symbol) => fetchYahooJson(symbol, "5d", "1d", 300)),
+    symbols.map((symbol) => resolveQuote(symbol, env)),
   );
 
   const quotes = settled.map((result, index) => {
     const symbol = symbols[index];
-
     if (result.status === "rejected") {
       return {
         symbol,
         error: result.reason instanceof Error ? result.reason.message : "Unknown error",
       };
     }
-
-    return normalizeQuote(symbol, result.value);
+    return result.value;
   });
+  const sources = [...new Set(
+    quotes.filter((quote) => !quote.error).map((quote) => quote.source),
+  )];
 
   return jsonResponse({
     quotes,
+    sources,
     fetchedAt: new Date().toISOString(),
   }, 200, "public, max-age=60, s-maxage=300");
 }
 
-async function handleChart(requestUrl) {
+async function resolveQuote(symbol, env) {
+  const attempts = [];
+
+  try {
+    const yahoo = await fetchYahooWithFallback(symbol, "5d", "1d", 300, attempts);
+    const quote = normalizeQuote(symbol, yahoo.payload);
+    const value = {
+      ...quote,
+      source: yahoo.source,
+      stale: false,
+      attempts,
+    };
+    await putCache(env, quoteCacheKey(symbol), value);
+    return value;
+  } catch (error) {
+    attempts.push(error instanceof Error ? error.message : String(error));
+  }
+
+  if (symbol === "^TWII") {
+    try {
+      const value = {
+        ...(await fetchTwseQuote()),
+        source: "twse",
+        stale: false,
+        attempts,
+      };
+      await putCache(env, quoteCacheKey(symbol), value);
+      return value;
+    } catch (error) {
+      attempts.push(`twse: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  if (/^\d{4,6}\.TW$/.test(symbol)) {
+    try {
+      const value = {
+        ...(await fetchTwseStockQuote(symbol)),
+        source: "twse-stock",
+        stale: false,
+        attempts,
+      };
+      await putCache(env, quoteCacheKey(symbol), value);
+      return value;
+    } catch (error) {
+      attempts.push(`twse-stock: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  const cached = await getCache(env, quoteCacheKey(symbol));
+  if (cached && Number.isFinite(cached.price)) {
+    return {
+      ...cached,
+      source: `cloudflare-kv:${cached.source || "unknown"}`,
+      stale: true,
+      attempts,
+    };
+  }
+
+  throw new Error(attempts.at(-1) || "No market data");
+}
+
+async function handleChart(requestUrl, env) {
   const symbol = parseSymbol(requestUrl.searchParams.get("symbol"));
   const range = parseAllowedValue(
     requestUrl.searchParams.get("range") || "1y",
@@ -109,39 +393,328 @@ async function handleChart(requestUrl) {
     ALLOWED_INTERVALS,
     "interval",
   );
-  const upstreamUrl = buildYahooUrl(symbol, range, interval);
-  const upstream = await fetch(upstreamUrl, {
+  const attempts = [];
+  let chartResult = null;
+
+  try {
+    const yahoo = await fetchYahooWithFallback(symbol, range, interval, chartCacheTtl(range), attempts);
+    chartResult = {
+      payload: yahoo.payload,
+      source: yahoo.source,
+      stale: false,
+      partial: false,
+      fetchedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    attempts.push(error instanceof Error ? error.message : String(error));
+  }
+
+  if (!chartResult && symbol === "^TWII" && TWSE_FALLBACK_RANGES.has(range)) {
+    try {
+      chartResult = {
+        payload: await fetchTwseHistory(range),
+        source: "twse",
+        stale: false,
+        partial: range === "1mo",
+        fetchedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      attempts.push(`twse: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  const cacheKey = chartCacheKey(symbol, range, interval);
+  if (chartResult) {
+    await putCache(env, cacheKey, chartResult);
+  } else {
+    const cached = await getCache(env, cacheKey);
+    if (cached?.payload?.chart?.result?.[0]) {
+      chartResult = {
+        ...cached,
+        source: `cloudflare-kv:${cached.source || "unknown"}`,
+        stale: true,
+      };
+    }
+  }
+
+  if (!chartResult) {
+    throw new Error(attempts.at(-1) || "No chart data");
+  }
+
+  return jsonResponse({
+    ...chartResult.payload,
+    _meta: {
+      source: chartResult.source,
+      stale: chartResult.stale,
+      partial: chartResult.partial,
+      fetchedAt: chartResult.fetchedAt,
+      attempts,
+    },
+  }, 200, range === "1d" || range === "5d"
+    ? "public, max-age=60, s-maxage=300"
+    : "public, max-age=300, s-maxage=3600");
+}
+
+async function handleFundSearch(requestUrl, env) {
+  const term = String(requestUrl.searchParams.get("term") || "").trim();
+  if (term.length < 2 || term.length > 80) {
+    throw new HttpError(400, "term length must be 2-80 characters");
+  }
+  const cacheKey = `fund-search:v3:${encodeURIComponent(term.toLowerCase())}`;
+
+  try {
+    const response = await fetch(buildMorningstarSearchUrl(term, 25), {
+      headers: upstreamJsonHeaders(),
+      cf: { cacheEverything: true, cacheTtl: 3600 },
+    });
+    if (!response.ok) throw new Error(`Morningstar HTTP ${response.status}`);
+    const payload = await response.json();
+    if (!Array.isArray(payload.rows)) throw new Error("Invalid Morningstar search response");
+    const result = {
+      rows: payload.rows,
+      source: "morningstar-via-cloudflare",
+      stale: false,
+      fetchedAt: new Date().toISOString(),
+    };
+    await putCache(env, cacheKey, result);
+    return jsonResponse(result, 200, "public, max-age=300, s-maxage=3600");
+  } catch (error) {
+    const cached = await getCache(env, cacheKey);
+    if (cached?.rows) {
+      return jsonResponse({
+        ...cached,
+        source: `cloudflare-kv:${cached.source || "morningstar"}`,
+        stale: true,
+      });
+    }
+    throw error;
+  }
+}
+
+async function handleFundHistory(requestUrl, env) {
+  const secId = String(requestUrl.searchParams.get("secId") || "").trim();
+  const currency = String(requestUrl.searchParams.get("currency") || "").trim().toUpperCase();
+  const start = String(requestUrl.searchParams.get("start") || "").trim();
+  const end = String(requestUrl.searchParams.get("end") || "").trim();
+  if (!FUND_ID_PATTERN.test(secId)) throw new HttpError(400, "Invalid secId");
+  if (currency && !CURRENCY_PATTERN.test(currency)) throw new HttpError(400, "Invalid currency");
+  if (!DATE_PATTERN.test(start) || !DATE_PATTERN.test(end) || start > end) {
+    throw new HttpError(400, "Invalid date range");
+  }
+  const cacheKey = `fund-history:v3:${secId}:${currency || "native"}:${start}:${end}`;
+
+  try {
+    const response = await fetch(buildMorningstarHistoryUrl(secId, currency, start, end), {
+      headers: upstreamJsonHeaders(),
+      cf: { cacheEverything: true, cacheTtl: 3600 },
+    });
+    if (!response.ok) throw new Error(`Morningstar HTTP ${response.status}`);
+    const payload = await response.json();
+    if (!Array.isArray(payload)) throw new Error("Invalid Morningstar history response");
+    const history = payload
+      .filter((point) => Array.isArray(point) && Number.isFinite(point[0]) && Number.isFinite(point[1]) && point[1] > 0);
+    if (history.length === 0) throw new Error("Morningstar returned no history");
+    const result = {
+      history,
+      source: "morningstar-via-cloudflare",
+      stale: false,
+      fetchedAt: new Date().toISOString(),
+    };
+    await putCache(env, cacheKey, result);
+    return jsonResponse(result, 200, "public, max-age=300, s-maxage=3600");
+  } catch (error) {
+    const cached = await getCache(env, cacheKey);
+    if (cached?.history) {
+      return jsonResponse({
+        ...cached,
+        source: `cloudflare-kv:${cached.source || "morningstar"}`,
+        stale: true,
+      });
+    }
+    throw error;
+  }
+}
+
+async function handleTdccNav(requestUrl, env) {
+  const isin = String(requestUrl.searchParams.get("isin") || "").trim().toUpperCase();
+  if (!ISIN_PATTERN.test(isin)) throw new HttpError(400, "Invalid ISIN");
+  const cacheKey = `tdcc-nav:v3:${isin}`;
+
+  try {
+    const response = await fetch(TDCC_OFFSHORE_URL, {
+      headers: upstreamJsonHeaders(),
+      cf: { cacheEverything: true, cacheTtl: 21600 },
+    });
+    if (!response.ok) throw new Error(`TDCC HTTP ${response.status}`);
+    const rows = await response.json();
+    if (!Array.isArray(rows)) throw new Error("Invalid TDCC response");
+    const matched = rows
+      .filter((row) => row.ISINCODE === isin)
+      .sort((a, b) => String(a["日期"] || "").localeCompare(String(b["日期"] || "")));
+    const latestRow = matched.at(-1);
+    const rawDate = String(latestRow?.["日期"] || "");
+    const nav = parseNumber(latestRow?.["基金淨值(金額)"]);
+    if (!/^\d{8}$/.test(rawDate) || !Number.isFinite(nav) || nav <= 0) {
+      throw new Error("TDCC returned no valid NAV");
+    }
+    const result = {
+      latest: {
+        date: `${rawDate.slice(0, 4)}-${rawDate.slice(4, 6)}-${rawDate.slice(6, 8)}`,
+        nav,
+      },
+      source: "tdcc-via-cloudflare",
+      stale: false,
+      fetchedAt: new Date().toISOString(),
+    };
+    await putCache(env, cacheKey, result);
+    return jsonResponse(result, 200, "public, max-age=1800, s-maxage=21600");
+  } catch (error) {
+    const cached = await getCache(env, cacheKey);
+    if (cached?.latest) {
+      return jsonResponse({
+        ...cached,
+        source: `cloudflare-kv:${cached.source || "tdcc"}`,
+        stale: true,
+      });
+    }
+    throw error;
+  }
+}
+
+async function fetchYahooWithFallback(symbol, range, interval, cacheTtl, attempts) {
+  for (const base of YAHOO_BASES) {
+    try {
+      return await fetchYahooFromBase(base, symbol, range, interval, cacheTtl);
+    } catch (error) {
+      attempts.push(`${base.name}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  throw new Error("Yahoo Finance providers unavailable");
+}
+
+async function fetchYahooFromBase(base, symbol, range, interval, cacheTtl) {
+  const response = await fetch(buildYahooUrl(base.url, symbol, range, interval), {
     headers: yahooHeaders(),
     cf: {
       cacheEverything: true,
-      cacheTtl: range === "1d" || range === "5d" ? 300 : 3600,
+      cacheTtl,
     },
   });
 
-  if (!upstream.ok) {
-    console.error(JSON.stringify({
-      event: "yahoo_chart_failed",
-      symbol,
-      range,
-      interval,
-      status: upstream.status,
-    }));
-    return jsonResponse({ error: `Yahoo Finance HTTP ${upstream.status}` }, 502);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
   }
 
-  const headers = new Headers({
-    ...CORS_HEADERS,
-    ...SECURITY_HEADERS,
-    "Content-Type": upstream.headers.get("Content-Type") || "application/json; charset=utf-8",
-    "Cache-Control": range === "1d" || range === "5d"
-      ? "public, max-age=60, s-maxage=300"
-      : "public, max-age=300, s-maxage=3600",
-  });
+  const payload = await response.json();
+  if (!payload?.chart?.result?.[0]?.meta) {
+    throw new Error(payload?.chart?.error?.description || "Invalid Yahoo response");
+  }
 
-  return new Response(upstream.body, {
-    status: upstream.status,
-    headers,
+  return { payload, source: base.name };
+}
+
+async function fetchTwseQuote() {
+  const response = await fetch(TWSE_INDEX_URL, {
+    headers: {
+      "Accept": "application/json",
+      "User-Agent": "Mozilla/5.0 (compatible; FundTrackerMarketAPI/4.0)",
+    },
+    cf: { cacheEverything: true, cacheTtl: 300 },
   });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+  const rows = await response.json();
+  const row = rows.find((item) => String(Object.values(item)[1] || "").includes("發行量加權"));
+  if (!row) throw new Error("TWSE weighted index not found");
+
+  const values = Object.values(row);
+  const close = parseNumber(values[2]);
+  const changePoints = parseNumber(values[4]);
+  const sign = values[3] === "-" ? -1 : 1;
+  if (!Number.isFinite(close) || !Number.isFinite(changePoints)) {
+    throw new Error("TWSE returned invalid index values");
+  }
+
+  return {
+    symbol: "^TWII",
+    price: close,
+    previousClose: close - sign * changePoints,
+    currency: "TWD",
+    exchange: "TWSE",
+    marketTime: rocDateToUnix(String(values[0] || "")),
+  };
+}
+
+async function fetchTwseHistory(range) {
+  const response = await fetch(TWSE_HISTORY_URL, {
+    headers: {
+      "Accept": "application/json",
+      "User-Agent": "Mozilla/5.0 (compatible; FundTrackerMarketAPI/4.0)",
+    },
+    cf: { cacheEverything: true, cacheTtl: 3600 },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+  const rows = await response.json();
+  let points = rows.map((row) => ({
+    timestamp: rocDateToUnix(String(row.Date || "")),
+    close: parseNumber(row.ClosingIndex),
+  })).filter((point) => Number.isFinite(point.timestamp) && Number.isFinite(point.close));
+
+  if (range === "1d") points = points.slice(-2);
+  if (range === "5d") points = points.slice(-5);
+  if (points.length < 2) throw new Error("TWSE history has fewer than two points");
+
+  const closes = points.map((point) => point.close);
+  return {
+    chart: {
+      result: [{
+        meta: {
+          currency: "TWD",
+          symbol: "^TWII",
+          exchangeName: "TWSE",
+          regularMarketPrice: closes.at(-1),
+          chartPreviousClose: closes.at(-2),
+        },
+        timestamp: points.map((point) => point.timestamp),
+        indicators: {
+          quote: [{ close: closes }],
+          adjclose: [{ adjclose: closes }],
+        },
+      }],
+      error: null,
+    },
+  };
+}
+
+async function fetchTwseStockQuote(symbol) {
+  const code = symbol.replace(/\.TW$/, "");
+  if (!/^\d{4,6}$/.test(code)) throw new Error("Unsupported TWSE stock symbol");
+  const response = await fetch(TWSE_STOCK_DAILY_URL, {
+    headers: {
+      "Accept": "application/json",
+      "User-Agent": "Mozilla/5.0 (compatible; FundTrackerMarketAPI/4.0)",
+    },
+    cf: { cacheEverything: true, cacheTtl: 300 },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+  const rows = await response.json();
+  const row = rows.find((item) => item.Code === code);
+  const close = parseNumber(row?.ClosingPrice);
+  const change = parseNumber(row?.Change);
+  if (!row || !Number.isFinite(close) || close <= 0) {
+    throw new Error(`TWSE returned no quote for ${code}`);
+  }
+
+  return {
+    symbol,
+    price: close,
+    previousClose: Number.isFinite(change) ? close - change : null,
+    currency: "TWD",
+    exchange: "TWSE",
+    marketTime: rocDateToUnix(String(row.Date || "")),
+  };
 }
 
 function parseSymbols(rawSymbols) {
@@ -160,6 +733,12 @@ function parseSymbols(rawSymbols) {
   return symbols;
 }
 
+function normalizeAssetQueries(rawQuery) {
+  const query = rawQuery.trim().toUpperCase();
+  if (/^\d{4,6}$/.test(query)) return [`${query}.TW`, `${query}.TWO`, query];
+  return [query];
+}
+
 function parseSymbol(rawSymbol) {
   if (!rawSymbol || !SYMBOL_PATTERN.test(rawSymbol)) {
     throw new HttpError(400, "Invalid symbol");
@@ -174,24 +753,8 @@ function parseAllowedValue(value, allowedValues, fieldName) {
   return value;
 }
 
-async function fetchYahooJson(symbol, range, interval, cacheTtl) {
-  const response = await fetch(buildYahooUrl(symbol, range, interval), {
-    headers: yahooHeaders(),
-    cf: {
-      cacheEverything: true,
-      cacheTtl,
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Yahoo Finance HTTP ${response.status}`);
-  }
-
-  return await response.json();
-}
-
-function buildYahooUrl(symbol, range, interval) {
-  const url = new URL(`${YAHOO_CHART_BASE}/${encodeURIComponent(symbol)}`);
+function buildYahooUrl(baseUrl, symbol, range, interval) {
+  const url = new URL(`${baseUrl}/${encodeURIComponent(symbol)}`);
   url.searchParams.set("range", range);
   url.searchParams.set("interval", interval);
   url.searchParams.set("includePrePost", "false");
@@ -199,18 +762,55 @@ function buildYahooUrl(symbol, range, interval) {
   return url.toString();
 }
 
+function buildMorningstarSearchUrl(term, pageSize) {
+  const dataPoints = "SecId|Name|LegalName|ClosePrice|ClosePriceDate|PriceCurrency|ISIN|CategoryName|CustomCategoryId";
+  const url = new URL(`${MORNINGSTAR_BASE}/${MORNINGSTAR_TOKEN}/security/screener`);
+  url.searchParams.set("page", "1");
+  url.searchParams.set("pageSize", String(pageSize));
+  url.searchParams.set("sortOrder", "Name asc");
+  url.searchParams.set("outputType", "json");
+  url.searchParams.set("version", "1");
+  url.searchParams.set("languageId", "zh-TW");
+  url.searchParams.set("currencyId", "TWD");
+  url.searchParams.set("universeIds", MORNINGSTAR_UNIVERSE);
+  url.searchParams.set("securityDataPoints", dataPoints);
+  url.searchParams.set("term", term);
+  return url.toString();
+}
+
+function buildMorningstarHistoryUrl(secId, currency, start, end) {
+  const morningstarId = `${secId}]2]0]${MORNINGSTAR_UNIVERSE}`;
+  const url = new URL(`${MORNINGSTAR_BASE}/timeseries_price/${MORNINGSTAR_TOKEN}`);
+  url.searchParams.set("id", morningstarId);
+  url.searchParams.set("currencyId", currency);
+  url.searchParams.set("idtype", "Morningstar");
+  url.searchParams.set("frequency", "daily");
+  url.searchParams.set("startDate", start);
+  url.searchParams.set("endDate", end);
+  url.searchParams.set("outputType", "COMPACTJSON");
+  return url.toString();
+}
+
 function yahooHeaders() {
   return {
     "Accept": "application/json",
     "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
-    "User-Agent": "Mozilla/5.0 (compatible; FundTrackerMarketAPI/2.0)",
+    "User-Agent": "Mozilla/5.0 (compatible; FundTrackerMarketAPI/4.0)",
+  };
+}
+
+function upstreamJsonHeaders() {
+  return {
+    "Accept": "application/json",
+    "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+    "User-Agent": "Mozilla/5.0 (compatible; FundTrackerAPI/4.0)",
   };
 }
 
 function normalizeQuote(symbol, payload) {
   const result = payload?.chart?.result?.[0];
   if (!result?.meta) {
-    return { symbol, error: "No market data" };
+    throw new Error("No market data");
   }
 
   const meta = result.meta;
@@ -221,21 +821,73 @@ function normalizeQuote(symbol, payload) {
     .filter((point) => Number.isFinite(point.value));
   const latestPoint = validPoints.at(-1);
   const previousPoint = validPoints.at(-2);
-  const price = latestPoint?.value;
-  const previousClose = previousPoint?.value;
 
-  if (!Number.isFinite(price)) {
-    return { symbol, error: "No current price" };
+  if (!Number.isFinite(latestPoint?.value)) {
+    throw new Error("No current price");
   }
 
   return {
     symbol,
-    price,
-    previousClose: Number.isFinite(previousClose) ? previousClose : null,
+    price: latestPoint.value,
+    previousClose: Number.isFinite(previousPoint?.value) ? previousPoint.value : null,
     currency: meta.currency || null,
     exchange: meta.exchangeName || null,
-    marketTime: Number.isFinite(latestPoint?.timestamp) ? latestPoint.timestamp : null,
+    marketTime: Number.isFinite(latestPoint.timestamp) ? latestPoint.timestamp : null,
   };
+}
+
+function rocDateToUnix(value) {
+  if (!/^\d{7}$/.test(value)) return null;
+  const year = Number(value.slice(0, 3)) + 1911;
+  const month = Number(value.slice(3, 5));
+  const day = Number(value.slice(5, 7));
+  return Math.floor(Date.UTC(year, month - 1, day, 5, 30) / 1000);
+}
+
+function parseNumber(value) {
+  const parsed = Number(String(value ?? "").replaceAll(",", "").trim());
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function chartCacheTtl(range) {
+  return range === "1d" || range === "5d" ? 300 : 3600;
+}
+
+function quoteCacheKey(symbol) {
+  return `quote:v4:${symbol}`;
+}
+
+function chartCacheKey(symbol, range, interval) {
+  return `chart:v4:${symbol}:${range}:${interval}`;
+}
+
+async function putCache(env, key, value) {
+  if (!env.MARKET_CACHE) return;
+  try {
+    await env.MARKET_CACHE.put(key, JSON.stringify(value), {
+      expirationTtl: KV_TTL_SECONDS,
+    });
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "kv_put_failed",
+      key,
+      message: error instanceof Error ? error.message : String(error),
+    }));
+  }
+}
+
+async function getCache(env, key) {
+  if (!env.MARKET_CACHE) return null;
+  try {
+    return await env.MARKET_CACHE.get(key, "json");
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "kv_get_failed",
+      key,
+      message: error instanceof Error ? error.message : String(error),
+    }));
+    return null;
+  }
 }
 
 function jsonResponse(body, status = 200, cacheControl = "no-store") {

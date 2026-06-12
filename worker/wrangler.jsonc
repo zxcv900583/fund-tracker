@@ -9,5 +9,11 @@
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
-  }
+  },
+  "kv_namespaces": [
+    {
+      "binding": "MARKET_CACHE",
+      "id": "0f94224d16b449559de89e024f2aa171"
+    }
+  ]
 }
