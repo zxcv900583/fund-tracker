@@ -506,14 +506,20 @@ async function run() {
   await waitForPage(cdp, `marketChart?.data?.datasets?.length>=3`, 30000);
   const mobile = await cdp.evaluate(`({
     viewport:innerWidth,
+    viewportHeight:innerHeight,
     bodyWidth:document.body.scrollWidth,
     actionDockPosition:getComputedStyle(document.querySelector("#actionDock")).position,
     actionButtonHeight:Math.round(document.querySelector("#btnRefresh").getBoundingClientRect().height),
+    marketToolsDisplay:getComputedStyle(document.querySelector("#marketBarTools")).display,
+    combinedUpdateStatus:document.querySelector("#updStatus").textContent,
     summaryColumns:getComputedStyle(document.querySelector(".summary")).gridTemplateColumns.split(" ").length,
     summaryVisibleItems:[...document.querySelectorAll(".sum-item")].filter(item=>{
       const rect=item.getBoundingClientRect();
       return rect.width>0 && rect.top>=0 && rect.bottom<=innerHeight;
     }).length,
+    assetHeadingLeft:getComputedStyle(document.querySelector("#fundTable th:first-child")).left,
+    assetCellPosition:getComputedStyle(document.querySelector("#tbody tr:first-child td:first-child")).position,
+    assetCellLeft:getComputedStyle(document.querySelector("#tbody tr:first-child td:first-child")).left,
     operationColumnDisplay:getComputedStyle(document.querySelector("#fundTable th:last-child")).display,
     operationCellButtons:document.querySelectorAll("#tbody tr:first-child td:last-child button[data-act]").length,
     operationCellIndex:[...document.querySelector("#tbody tr:first-child").children].findIndex(cell=>cell.classList.contains("operation-cell")),
@@ -524,6 +530,10 @@ async function run() {
     mainChartCanvasHeight:document.querySelector("#chartCanvas").height,
     mainChartVisible:document.querySelector("#chartHint").style.display==="none",
     chartViewportIntersection:Math.max(0,Math.min(document.querySelector("#chartCanvas").getBoundingClientRect().bottom,document.querySelector("#actionDock").getBoundingClientRect().top)-Math.max(0,document.querySelector("#chartCanvas").getBoundingClientRect().top)),
+    pageScrollHeight:document.documentElement.scrollHeight,
+    chartBottomSpace:Math.round(chart.height-chart.chartArea.bottom),
+    chartXAxisPadding:chart.options.scales.x.ticks.padding,
+    chartXAxisMaxRotation:chart.options.scales.x.ticks.maxRotation,
     mainChartFontSize:chart.options.scales.x.ticks.font.size,
     dialogWidth:Math.round(document.querySelector("#dlgMarket").getBoundingClientRect().width),
     chartWidth:document.querySelector("#marketHistoryChart").width,
@@ -534,18 +544,27 @@ async function run() {
   assert.equal(mobile.bodyWidth, 390);
   assert.equal(mobile.actionDockPosition, "fixed");
   assert.ok(mobile.actionButtonHeight >= 50);
+  assert.equal(mobile.marketToolsDisplay,"none");
+  assert.match(mobile.combinedUpdateStatus,/基金淨值/);
+  assert.match(mobile.combinedUpdateStatus,/股市 (Yahoo|TWSE|Cloudflare|市場 API)/);
   assert.equal(mobile.summaryColumns,3);
   assert.equal(mobile.summaryVisibleItems,6);
+  assert.equal(mobile.assetHeadingLeft,"auto");
+  assert.notEqual(mobile.assetCellPosition,"sticky");
+  assert.equal(mobile.assetCellLeft,"auto");
   assert.notEqual(mobile.operationColumnDisplay, "none");
   assert.equal(mobile.operationCellButtons,4);
   assert.equal(mobile.operationCellIndex,10);
   assert.match(mobile.operationCellText.replace(/\s+/g,""),/買入.*管理.*比較/);
   assert.equal(mobile.nameCellButtons,0);
-  assert.ok(mobile.mainChartAreaHeight >= 380);
-  assert.ok(mobile.mainChartWrapHeight >= 280);
-  assert.ok(mobile.mainChartCanvasHeight > 200);
+  assert.ok(mobile.mainChartAreaHeight >= 590);
+  assert.ok(mobile.mainChartWrapHeight >= 450);
+  assert.ok(mobile.mainChartCanvasHeight > 400);
   assert.equal(mobile.mainChartVisible,true);
-  assert.ok(mobile.chartViewportIntersection >= 80);
+  assert.ok(mobile.pageScrollHeight > mobile.viewportHeight);
+  assert.ok(mobile.chartBottomSpace >= 50);
+  assert.ok(mobile.chartXAxisPadding >= 10);
+  assert.ok(mobile.chartXAxisMaxRotation <= 30);
   assert.ok(mobile.mainChartFontSize >= 13);
   assert.ok(mobile.dialogWidth <= 390);
   assert.ok(mobile.chartWidth > 300);
