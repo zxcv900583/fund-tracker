@@ -619,19 +619,38 @@ async function fetchT(url, ms=20000){
 }
 
 // 搜尋基金（Morningstar screener）
-async function msSearch(term){
+async function msSearchResult(term, options={}){
+  const fresh = options.fresh===true;
+  const freshQuery = fresh ? `&fresh=1&_=${Date.now()}` : "";
   try{
-    const payload = await marketFetch(`/api/funds/search?term=${encodeURIComponent(term)}`);
+    const payload = await marketFetch(`/api/funds/search?term=${encodeURIComponent(term)}${freshQuery}`);
     apiDiagnostics.fundSearch = payload.source||"cloudflare";
-    return mapMorningstarRows(payload.rows||[]);
+    return {
+      rows:mapMorningstarRows(payload.rows||[]),
+      source:payload.source||"cloudflare",
+      stale:payload.stale===true,
+      fetchedAt:payload.fetchedAt||null,
+      fresh:payload.fresh===true
+    };
   }catch(proxyError){
     console.warn("基金搜尋代理失敗，改用 Morningstar 直連", proxyError);
   }
   const dp = "SecId|Name|LegalName|ClosePrice|ClosePriceDate|PriceCurrency|ISIN|CategoryName|CustomCategoryId";
-  const url = `${MS_BASE}/${MS_TOKEN}/security/screener?page=1&pageSize=25&sortOrder=${encodeURIComponent("Name asc")}&outputType=json&version=1&languageId=zh-TW&currencyId=TWD&universeIds=${encodeURIComponent(UNIVERSE)}&securityDataPoints=${encodeURIComponent(dp)}&term=${encodeURIComponent(term)}`;
+  const bust = fresh ? `&_=${Date.now()}` : "";
+  const url = `${MS_BASE}/${MS_TOKEN}/security/screener?page=1&pageSize=25&sortOrder=${encodeURIComponent("Name asc")}&outputType=json&version=1&languageId=zh-TW&currencyId=TWD&universeIds=${encodeURIComponent(UNIVERSE)}&securityDataPoints=${encodeURIComponent(dp)}&term=${encodeURIComponent(term)}${bust}`;
   const j = await (await fetchT(url)).json();
   apiDiagnostics.fundSearch = "morningstar-direct";
-  return mapMorningstarRows(j.rows||[]);
+  return {
+    rows:mapMorningstarRows(j.rows||[]),
+    source:"morningstar-direct",
+    stale:false,
+    fetchedAt:new Date().toISOString(),
+    fresh
+  };
+}
+
+async function msSearch(term, options={}){
+  return (await msSearchResult(term,options)).rows;
 }
 
 function mapMorningstarRows(rows){
@@ -639,6 +658,23 @@ function mapMorningstarRows(rows){
     secId:r.SecId, name:r.Name||r.LegalName, nav:r.ClosePrice, navDate:r.ClosePriceDate,
     currency:r.PriceCurrency||"TWD", isin:r.ISIN||"", category:r.CategoryName||""
   }));
+}
+
+function findExactFundQuote(h, rows){
+  if(!h || !Array.isArray(rows)) return null;
+  const fundCode = String(h.fundCode||"").trim().toUpperCase();
+  const isin = String(h.isin||"").trim().toUpperCase();
+  return rows.find(row=>{
+    const rowCode = String(row?.secId||"").trim().toUpperCase();
+    const rowIsin = String(row?.isin||"").trim().toUpperCase();
+    const exactId = Boolean(fundCode && rowCode===fundCode);
+    const exactIsin = Boolean(isin && rowIsin===isin);
+    return (exactId || exactIsin)
+      && Number.isFinite(Number(row?.nav))
+      && Number(row.nav)>0
+      && /^\d{4}-\d{2}-\d{2}$/.test(String(row?.navDate||""))
+      && String(row.navDate)<=todayStr();
+  })||null;
 }
 
 // 淨值歷史（Morningstar timeseries, 計價幣別）
@@ -1258,7 +1294,9 @@ function updateResult(h,before,ok,meta={}){
     )),
     source:meta.source||getCache(h).source||null,
     stale:meta.stale===true,
-    fetchedAt:meta.fetchedAt||null
+    fetchedAt:meta.fetchedAt||null,
+    latestSupplemented:meta.latestSupplemented===true,
+    historyLatestDate:meta.historyLatestDate||null
   };
 }
 
@@ -1286,14 +1324,45 @@ async function updateFund(h, options={}){
     if(h.currency!=="TWD") await ensureFx(h);
     return updateResult(h,before,ok,meta);
   }
-  try{
-    const result = await msHistoryResult(h.fundCode,start,todayStr(),h.currency,{fresh:opts.fresh===true});
-    meta = result;
-    if(result.history.length){
-      mergeHistory(h,result.history,result.source);
+  const quoteTerm = String(h.isin||h.fundCode||"").trim();
+  const [historySettled,quoteSettled] = await Promise.allSettled([
+    msHistoryResult(h.fundCode,start,todayStr(),h.currency,{fresh:opts.fresh===true}),
+    quoteTerm
+      ? msSearchResult(quoteTerm,{fresh:opts.fresh===true})
+      : Promise.reject(new Error("基金缺少 ISIN 與 Morningstar SecId"))
+  ]);
+  let historyResult = null;
+  if(historySettled.status==="fulfilled"){
+    historyResult = historySettled.value;
+    meta = {...historyResult,historyLatestDate:historyResult.history.at(-1)?.date||null};
+    if(historyResult.history.length){
+      mergeHistory(h,historyResult.history,historyResult.source);
       ok = true;
     }
-  }catch(e){ console.error(`基金歷史更新失敗：${h.fundName}`, e); }
+  }else{
+    console.error(`基金歷史更新失敗：${h.fundName}`,historySettled.reason);
+  }
+  if(quoteSettled.status==="fulfilled"){
+    const quoteResult = quoteSettled.value;
+    const quote = findExactFundQuote(h,quoteResult.rows);
+    if(quote){
+      const historyLatestDate = historyResult?.history.at(-1)?.date||null;
+      const latestSupplemented = !historyLatestDate || quote.navDate>historyLatestDate;
+      mergeHistory(h,[{date:quote.navDate,nav:Number(quote.nav)}],quoteResult.source);
+      meta = {
+        source:quoteResult.source,
+        stale:quoteResult.stale===true,
+        fetchedAt:quoteResult.fetchedAt||meta.fetchedAt||null,
+        latestSupplemented,
+        historyLatestDate
+      };
+      ok = true;
+    }else{
+      console.warn(`基金最新淨值查無完全相符項目：${h.fundName}`);
+    }
+  }else{
+    console.error(`基金最新淨值更新失敗：${h.fundName}`,quoteSettled.reason);
+  }
   if(!ok){ // TDCC 備援（境外）
     const t = await tdccOffshoreNav(h.isin);
     if(t && t.nav){

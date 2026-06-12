@@ -306,6 +306,61 @@ async function run() {
   cdp.events.length = 0;
   console.log("[e2e] NAV refresh date and completion feedback passed");
 
+  const latestQuoteReconciliation = await cdp.evaluate(`(async()=>{
+    const testHolding = {
+      id:"latest_quote_test",
+      assetType:"fund",
+      fundCode:"F00001DXL2",
+      fundName:"第一金台灣核心戰略建設基金",
+      currency:"TWD",
+      isin:"TW000T0363A9",
+      purchases:[],
+      dividends:[],
+      rspPlans:[]
+    };
+    const originalHistory = msHistoryResult;
+    const originalSearch = msSearchResult;
+    navMem[testHolding.fundCode] = {
+      fundCode:testHolding.fundCode,
+      lastUpdated:new Date().toISOString(),
+      source:"test-fixture",
+      navHistory:[{date:"2026-06-11",nav:42.02}]
+    };
+    try{
+      msHistoryResult = async()=>({
+        history:[{date:"2026-06-11",nav:42.02}],
+        source:"morningstar-history-test",
+        stale:false,
+        fetchedAt:"2026-06-12T14:00:00.000Z",
+        fresh:true
+      });
+      msSearchResult = async()=>({
+        rows:[
+          {secId:"WRONG",isin:"TW000T0363A9X",nav:999,navDate:"2026-06-12"},
+          {secId:"F00001DXL2",isin:"TW000T0363A9",nav:42.8,navDate:"2026-06-12"}
+        ],
+        source:"morningstar-search-test",
+        stale:false,
+        fetchedAt:"2026-06-12T14:00:01.000Z",
+        fresh:true
+      });
+      const result = await updateFund(testHolding,{fresh:true});
+      const latestPoint = getCache(testHolding).navHistory.at(-1);
+      return {result,latestPoint};
+    }finally{
+      msHistoryResult = originalHistory;
+      msSearchResult = originalSearch;
+      delete navMem[testHolding.fundCode];
+      localStorage.removeItem(navKey(testHolding.fundCode));
+    }
+  })()`);
+  assert.equal(latestQuoteReconciliation.result.ok,true);
+  assert.equal(latestQuoteReconciliation.result.latestDate,"2026-06-12");
+  assert.equal(latestQuoteReconciliation.result.latestSupplemented,true);
+  assert.equal(latestQuoteReconciliation.result.historyLatestDate,"2026-06-11");
+  assert.deepEqual(latestQuoteReconciliation.latestPoint,{date:"2026-06-12",nav:42.8});
+  console.log("[e2e] latest fund quote reconciliation passed");
+
   await cdp.evaluate(`document.querySelector("#btnCompare").click()`);
   await waitForPage(cdp, `marketChart?.data?.datasets?.length===3`, 45000);
   const comparison = await cdp.evaluate(`({
@@ -590,6 +645,7 @@ async function run() {
     initial,
     refreshResults,
     refreshFeedback,
+    latestQuoteReconciliation,
     comparison,
     comparisonBusinessDayPoints,
     fundSearch,

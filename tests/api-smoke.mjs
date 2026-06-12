@@ -85,7 +85,7 @@ async function run() {
   const health = await request("/health?deep=1");
   assert.equal(health.response.status, 200);
   assert.equal(health.body.status, "ok");
-  assert.equal(health.body.version, 5);
+  assert.equal(health.body.version, 6);
   assert.equal(health.body.cloudflareProxy, true);
   assert.equal(health.body.kvConfigured, true);
   assert.ok(health.body.checks.length >= 7);
@@ -122,6 +122,18 @@ async function run() {
   assert.equal(fundSearch.response.status, 200);
   assert.ok(fundSearch.body.rows.length >= 1);
   assert.match(fundSearch.body.source, /morningstar|cloudflare-kv/);
+
+  const freshFundSearch = await request("/api/funds/search?term=TW000T0363A9&fresh=1");
+  assert.equal(freshFundSearch.response.status, 200);
+  assert.equal(freshFundSearch.body.fresh, true);
+  assert.equal(freshFundSearch.body.stale, false);
+  assert.equal(freshFundSearch.response.headers.get("cache-control"), "no-store");
+  const exactFund = freshFundSearch.body.rows.find((row) =>
+    row.SecId === "F00001DXL2" && row.ISIN === "TW000T0363A9"
+  );
+  assert.ok(exactFund);
+  assert.ok(exactFund.ClosePrice > 0);
+  assert.match(exactFund.ClosePriceDate, /^\d{4}-\d{2}-\d{2}$/);
 
   const fundHistory = await request("/api/funds/history?secId=F0HKG05X2C&currency=TWD&start=2026-01-01&end=2026-06-12");
   assert.equal(fundHistory.response.status, 200);
@@ -184,6 +196,7 @@ async function run() {
     },
     fund: {
       searchRows: fundSearch.body.rows.length,
+      freshSearchDate: exactFund.ClosePriceDate,
       historyPoints: fundHistory.body.history.length,
       freshLatestDate: new Date(freshFundHistory.body.history.at(-1)[0]).toISOString().slice(0, 10),
       tdccDate: tdcc.body.latest.date,
