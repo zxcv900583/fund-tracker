@@ -137,14 +137,16 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
 .market-session{display:block;margin-top:2px;font-size:10px;color:var(--muted)}
 #marketBarTools{position:sticky;left:0;z-index:3;display:flex;align-items:center;gap:6px;padding:7px 10px;min-width:max-content;background:var(--panel);border-right:1px solid var(--border)}
 #marketStatus{font-size:11px;color:var(--muted)}
-#dlgMarket{width:min(920px,96vw);max-width:920px}
-#fundPicker,#marketPicker{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
-.market-pick{display:flex;align-items:center;gap:5px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--panel2);font-size:12px;cursor:pointer}
+#fundPicker,#marketPicker{display:flex;flex-wrap:wrap;gap:5px}
+.market-pick{display:flex;align-items:center;gap:5px;padding:3px 7px;border:1px solid var(--border);border-radius:6px;background:var(--panel2);font-size:12px;cursor:pointer;white-space:nowrap}
 .market-pick:has(input:checked){border-color:var(--accent);background:var(--sel)}
-.compare-section-title{font-size:12px;font-weight:700;color:var(--muted);margin:8px 0 6px}
-#marketHistoryWrap{height:min(430px,52vh);position:relative;border:1px solid var(--border);border-radius:8px;padding:6px}
-#marketHistoryChart{position:absolute;inset:6px}
-#marketHistoryStatus{min-height:20px;margin:7px 0;font-size:12px;color:var(--muted)}
+/* ===== 內嵌比較面板 ===== */
+#comparePanel{flex:none;border-bottom:1px solid var(--border);padding:7px 10px;background:var(--panel2);max-height:32vh;overflow:auto}
+#comparePanel .cmp-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:7px}
+#comparePickers{display:flex;flex-direction:column;gap:6px}
+.cmp-group{display:flex;align-items:flex-start;gap:6px}
+.cmp-lbl{flex:none;font-size:11px;font-weight:700;color:var(--muted);padding-top:5px;min-width:30px}
+#marketHistoryStatus{min-height:18px;margin-top:7px;font-size:12px;color:var(--muted)}
 /* mobile */
 @media (max-width:640px){
   body{font-size:15px;overflow:auto;padding-bottom:76px}
@@ -184,7 +186,8 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
   .dlgHead{font-size:16px}
   .dlgBody{font-size:15px}
   input[type=text],input[type=number],input[type=date],select{font-size:16px;min-height:42px}
-  #marketHistoryWrap{height:min(520px,58vh)}
+  #comparePanel{max-height:40vh}
+  #comparePanel .market-pick{font-size:13px;padding:5px 9px}
 }
 </style>
 </head>
@@ -255,7 +258,20 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
     <div class="tabs" id="rangeTabs"></div>
     <span class="spacer" style="flex:1"></span>
     <button class="tab" id="btnPortfolio" title="整體投資組合走勢">📊 組合</button>
+    <button class="tab" id="btnCompareView" title="比較多檔資產與市場（重疊折線）">⚖ 比較</button>
     <button class="tab" id="modeToggle" title="切換 % / 淨值">%</button>
+  </div>
+  <div id="comparePanel" hidden>
+    <div class="cmp-row">
+      <div class="tabs" id="marketRanges"></div>
+      <span class="spacer" style="flex:1"></span>
+      <button class="btn" id="btnMarketHistoryRefresh" title="重新抓取市場歷史">⟳ 重新抓取</button>
+    </div>
+    <div id="comparePickers">
+      <div class="cmp-group"><span class="cmp-lbl">庫存</span><div id="fundPicker"></div></div>
+      <div class="cmp-group"><span class="cmp-lbl">市場</span><div id="marketPicker"></div></div>
+    </div>
+    <div id="marketHistoryStatus"></div>
   </div>
   <div id="chartWrap">
     <canvas id="chartCanvas"></canvas>
@@ -464,27 +480,6 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
   </div>
 </dialog>
 
-<!-- ===== 基金與全球市場比較 Dialog ===== -->
-<dialog id="dlgMarket">
-  <div class="dlgHead"><span>基金與全球市場比較</span><button class="xBtn" data-close="dlgMarket">✕</button></div>
-  <div class="dlgBody">
-    <div class="note" style="margin:0 0 8px">最多選擇 6 個基金或市場；所有走勢以共同可比較起始日為 0%，避免不同成立日或交易日造成誤判。</div>
-    <div class="compare-section-title">庫存基金</div>
-    <div id="fundPicker"></div>
-    <div class="compare-section-title">全球市場</div>
-    <div id="marketPicker"></div>
-    <div class="tabs" id="marketRanges"></div>
-    <div id="marketHistoryStatus"></div>
-    <div id="marketHistoryWrap">
-      <canvas id="marketHistoryChart"></canvas>
-    </div>
-  </div>
-  <div class="dlgFoot">
-    <button class="btn" id="btnMarketHistoryRefresh">重新抓取</button>
-    <button class="btn primary" data-close="dlgMarket">關閉</button>
-  </div>
-</dialog>
-
 <input type="file" id="csvFile" accept=".csv,text/csv" hidden>
 <input type="file" id="importFile" accept=".json,application/json" hidden>
 <div id="toast" role="status" aria-live="polite"></div>
@@ -515,6 +510,9 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
    v1.8 修正股票更新與搜尋價格不一致：股票更新除歷史走勢外，另以與搜尋同源的
         /api/yahoo/quotes（含 TWSE 個股備援）取最新成交價覆蓋為最新一筆，
         庫存目前價格與搜尋顯示一致，且 Yahoo chart 缺資料時仍有備援
+   v1.9 比較功能改為主圖區內嵌檢視：移除彈窗，新增「⚖ 比較」檢視（與「組合」並列），
+        重疊折線直接畫在主畫布，選擇器與區間 tabs 內嵌於圖表上方面板，
+        在視窗內即可邊看清單邊比較，不再開彈窗
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
@@ -602,8 +600,7 @@ let curRange = settings.defaultChartRange || "3M";
 let customRange = null;            // {start,end}
 let chartMode = "pct";             // pct | nav
 let sortKey = null, sortAsc = true;
-let chart = null;
-let marketChart = null;
+let chart = null;                  // 主圖（基金/股票、組合、比較共用同一個 canvas）
 let marketCache = lsGet(LS_MARKET_CACHE, {quotes:{}, fetchedAt:null});
 let fundUpdateStatus = "";
 let marketUpdateStatus = "";
@@ -1025,8 +1022,10 @@ function renderMarketControls(){
 }
 
 function renderMarketHistoryChart(series){
-  if(marketChart){ marketChart.destroy(); marketChart=null; }
-  if(!series.length) return null;
+  if(chart){ chart.destroy(); chart=null; }
+  const hint = $("#chartHint");
+  if(!series.length){ hint.textContent="請於下方選擇要比較的基金或市場"; hint.style.display="flex"; return null; }
+  hint.style.display="none";
 
   const businessDays = marketBusinessDays(marketRange);
   const commonStart = businessDays ? null : series.map(item=>item.history[0]?.date).filter(Boolean).sort().at(-1);
@@ -1072,7 +1071,8 @@ function renderMarketHistoryChart(series){
     };
   });
 
-  marketChart = new Chart($("#marketHistoryChart"), {
+  $("#chartTitle").textContent = "⚖ 資產比較（相對報酬 %）";
+  chart = new Chart($("#chartCanvas"), {
     type:"line",
     data:{labels:dates,datasets},
     options:{
@@ -1178,7 +1178,7 @@ async function loadMarketHistory(force=false){
     : "歷史資料載入失敗，請稍後再試";
 }
 
-function openMarketDialog(symbol=null, fundId=null){
+function enterCompareView(symbol=null, fundId=null){
   if(symbol) addCompareSelection("market",symbol);
   if(fundId) addCompareSelection("fund",fundId);
   if(!compareSelectionCount()){
@@ -1186,9 +1186,22 @@ function openMarketDialog(symbol=null, fundId=null){
     else marketSelection = ["^TWII","^GSPC"];
     persistMarketSettings();
   }
+  chartView = "compare";
   renderMarketControls();
-  $("#dlgMarket").showModal();
+  applyChartViewChrome();
   loadMarketHistory(false);
+  // 手機版捲動到圖表區，方便直接看比較結果
+  if(window.matchMedia("(max-width:640px)").matches) $("#chartArea")?.scrollIntoView({behavior:"smooth",block:"start"});
+}
+
+// 依目前 chartView 切換主圖列控制項與比較面板的顯示
+function applyChartViewChrome(){
+  const compare = chartView==="compare";
+  $("#comparePanel").hidden = !compare;
+  $("#rangeTabs").style.display = compare ? "none" : "";
+  $("#modeToggle").style.display = compare ? "none" : "";
+  $("#btnPortfolio").classList.toggle("on", chartView==="portfolio");
+  $("#btnCompareView").classList.toggle("on", compare);
 }
 
 // 匯率（以同一基金 原幣 vs TWD 序列推算）
@@ -1858,11 +1871,12 @@ function renderPortfolioChart(){
 
 function renderChart(){
   const hint = $("#chartHint");
-  $("#btnPortfolio").classList.toggle("on", chartView==="portfolio");
+  applyChartViewChrome();
+  if(chartView==="compare") return;   // 比較圖由 loadMarketHistory 載入/重繪，避免每次 renderAll 重抓
   if(chartView==="portfolio") return renderPortfolioChart();
   const h = holdings.find(x=>x.id===selectedId);
   if(!h){
-    if(holdings.length){ chartView="portfolio"; $("#btnPortfolio").classList.add("on"); return renderPortfolioChart(); }
+    if(holdings.length){ chartView="portfolio"; applyChartViewChrome(); return renderPortfolioChart(); }
     hint.textContent="選擇資產以顯示走勢圖"; hint.style.display="flex"; if(chart){chart.destroy();chart=null;} $("#chartTitle").textContent="—"; return; }
   $("#chartTitle").textContent = h.fundName + "（"+h.currency+"）";
   const c = getCache(h);
@@ -2775,7 +2789,7 @@ $("#btnAdd").onclick = openAdd;
 $("#btnAddStock").onclick = openStock;
 $("#btnRefresh").onclick = ()=>updateAll({fresh:true});
 $("#btnMarketRefresh").onclick = ()=>loadMarketQuotes(true);
-$("#btnCompare").onclick = ()=>openMarketDialog();
+$("#btnCompare").onclick = ()=>enterCompareView();
 $("#btnExport").onclick = doExport;
 $("#btnImport").onclick = ()=>$("#importFile").click();
 $("#importFile").onchange = e=>{ if(e.target.files[0]) doImport(e.target.files[0]); e.target.value=""; };
@@ -2799,7 +2813,7 @@ $("#csvFile").onchange = async e=>{
 $("#btnCsvOk").onclick = confirmCsvImport;
 $("#marketBar").onclick = event=>{
   const marketButton = event.target.closest("[data-market-symbol]");
-  if(marketButton) openMarketDialog(marketButton.dataset.marketSymbol);
+  if(marketButton) enterCompareView(marketButton.dataset.marketSymbol);
 };
 $("#marketPicker").onchange = event=>{
   const input = event.target.closest("input[data-market-pick]");
@@ -2897,7 +2911,7 @@ $("#tbody").onclick = e=>{
       }
     }else if(btn.dataset.act==="mng"){ openMng(id); }
     else if(btn.dataset.act==="buy"){ openMng(id); openPurEdit(null); }
-    else if(btn.dataset.act==="cmp"){ openMarketDialog(null,id); }
+    else if(btn.dataset.act==="cmp"){ enterCompareView(null,id); }
     return;
   }
   const tr = e.target.closest("tr[data-id]");
@@ -2946,6 +2960,10 @@ $("#modeToggle").onclick = ()=>{
 $("#btnPortfolio").onclick = ()=>{
   chartView = chartView==="portfolio" ? "fund" : "portfolio";
   renderTabs(); renderChart();
+};
+$("#btnCompareView").onclick = ()=>{
+  if(chartView==="compare"){ chartView = "fund"; renderTabs(); renderChart(); }
+  else enterCompareView();
 };
 $("#btnAddPur").onclick = ()=>openPurEdit(null);
 $("#btnPurCancel").onclick = ()=>{ $("#purEdit").hidden=true; editPurId=null; };
@@ -3052,7 +3070,7 @@ $("#purBody").onclick = e=>{
   }
 };
 document.querySelectorAll("[data-close]").forEach(b=>{ b.onclick = ()=>document.getElementById(b.dataset.close).close(); });
-window.addEventListener("resize", ()=>{ if(chart) chart.resize(); if(marketChart) marketChart.resize(); });
+window.addEventListener("resize", ()=>{ if(chart) chart.resize(); });
 
 /* ---------------- PWA ---------------- */
 (function(){

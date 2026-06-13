@@ -367,17 +367,23 @@ async function run() {
   console.log("[e2e] latest fund quote reconciliation passed");
 
   await cdp.evaluate(`document.querySelector("#btnCompare").click()`);
-  await waitForPage(cdp, `marketChart?.data?.datasets?.length===3`, 45000);
+  await waitForPage(cdp, `chartView==="compare" && chart?.data?.datasets?.length===3`, 45000);
   const comparison = await cdp.evaluate(`({
-    open:document.querySelector("#dlgMarket").open,
+    panelVisible:!document.querySelector("#comparePanel").hidden,
+    rangeTabsHidden:document.querySelector("#rangeTabs").style.display==="none",
+    compareBtnOn:document.querySelector("#btnCompareView").classList.contains("on"),
+    chartTitle:document.querySelector("#chartTitle").textContent,
     checkedFunds:document.querySelectorAll("#fundPicker input:checked").length,
     checkedMarkets:document.querySelectorAll("#marketPicker input:checked").length,
     status:document.querySelector("#marketHistoryStatus").textContent,
-    labels:marketChart.data.datasets.map(dataset=>dataset.label),
-    firstValues:marketChart.data.datasets.map(dataset=>dataset.data.find(Number.isFinite)),
-    points:marketChart.data.datasets.map(dataset=>dataset.data.filter(Number.isFinite).length)
+    labels:chart.data.datasets.map(dataset=>dataset.label),
+    firstValues:chart.data.datasets.map(dataset=>dataset.data.find(Number.isFinite)),
+    points:chart.data.datasets.map(dataset=>dataset.data.filter(Number.isFinite).length)
   })`);
-  assert.equal(comparison.open, true);
+  assert.equal(comparison.panelVisible, true);
+  assert.equal(comparison.rangeTabsHidden, true);
+  assert.equal(comparison.compareBtnOn, true);
+  assert.match(comparison.chartTitle, /比較/);
   assert.equal(comparison.checkedFunds, 2);
   assert.equal(comparison.checkedMarkets, 1);
   assert.equal(comparison.labels.length, 3);
@@ -387,16 +393,18 @@ async function run() {
   comparison.points.forEach((count) => assert.ok(count > 20));
   assert.match(comparison.status, /共同起點/);
   await cdp.evaluate(`document.querySelector('#marketRanges [data-market-range="1bd"]').click()`);
-  await waitForPage(cdp, `marketChart?.data?.datasets?.length===3 && marketChart.data.datasets.every(dataset=>dataset.data.filter(Number.isFinite).length===2)`,30000);
+  await waitForPage(cdp, `chart?.data?.datasets?.length===3 && chart.data.datasets.every(dataset=>dataset.data.filter(Number.isFinite).length===2)`,30000);
   const comparisonBusinessDayPoints = await cdp.evaluate(
-    `marketChart.data.datasets.map(dataset=>dataset.data.filter(Number.isFinite).length)`
+    `chart.data.datasets.map(dataset=>dataset.data.filter(Number.isFinite).length)`
   );
   assert.deepEqual(comparisonBusinessDayPoints,[2,2,2]);
   await cdp.evaluate(`document.querySelector('#marketRanges [data-market-range="1y"]').click()`);
-  await waitForPage(cdp, `marketChart?.data?.datasets?.every(dataset=>dataset.data.filter(Number.isFinite).length>20)`,30000);
+  await waitForPage(cdp, `chart?.data?.datasets?.every(dataset=>dataset.data.filter(Number.isFinite).length>20)`,30000);
   console.log("[e2e] fund and market comparison passed");
 
-  await cdp.evaluate(`document.querySelector('#dlgMarket [data-close="dlgMarket"]').click()`);
+  // 切回單一資產檢視（點表格列），確認比較面板收起
+  await cdp.evaluate(`[...document.querySelectorAll("#tbody tr[data-id]")][0].click()`);
+  await waitForPage(cdp, `chartView==="fund" && document.querySelector("#comparePanel").hidden`);
   await cdp.evaluate(`document.querySelector("#btnAdd").click()`);
   await cdp.evaluate(`(() => {
     const input=document.querySelector("#searchInput");
@@ -529,19 +537,25 @@ async function run() {
     const h=JSON.parse(localStorage.getItem("fund_tracker_holdings")).find(item=>item.symbol==="2330.TW");
     document.querySelector('button[data-act="cmp"][data-id="'+h.id+'"]').click();
   })()`);
-  await waitForPage(cdp, `marketChart?.data?.datasets?.some(dataset=>dataset.label.startsWith("股票 ·"))`, 30000);
+  await waitForPage(cdp, `chartView==="compare" && chart?.data?.datasets?.some(dataset=>dataset.label.startsWith("股票 ·"))`, 30000);
   const stockComparison = await cdp.evaluate(`({
-    labels:marketChart.data.datasets.map(dataset=>dataset.label),
+    labels:chart.data.datasets.map(dataset=>dataset.label),
     checkedFunds:document.querySelectorAll("#fundPicker input:checked").length,
-    checkedMarkets:document.querySelectorAll("#marketPicker input:checked").length
+    checkedMarkets:document.querySelectorAll("#marketPicker input:checked").length,
+    panelVisible:!document.querySelector("#comparePanel").hidden
   })`);
   assert.ok(stockComparison.labels.some((label) => label.includes("2330")));
   assert.equal(stockComparison.checkedFunds, 3);
   assert.equal(stockComparison.checkedMarkets, 1);
+  assert.equal(stockComparison.panelVisible, true);
   console.log("[e2e] cross-asset comparison passed");
 
+  // 離開比較模式回到單一基金走勢圖（漲跌色測試需主圖為單一資產的趨勢色線）
+  await cdp.evaluate(`[...document.querySelectorAll("#tbody tr[data-id]")].find(tr=>tr.textContent.includes("統一奔騰")).click()`);
+  await waitForPage(cdp, `chartView==="fund" && document.querySelector("#comparePanel").hidden && chart?.data?.datasets?.length===1`);
+
   const themeBefore = await cdp.evaluate(`document.body.dataset.theme`);
-  await cdp.evaluate(`document.querySelector("#dlgMarket").close(); document.querySelector("#btnTheme").click()`);
+  await cdp.evaluate(`document.querySelector("#btnTheme").click()`);
   const themeAfter = await cdp.evaluate(`document.body.dataset.theme`);
   assert.notEqual(themeBefore, themeAfter);
 
@@ -574,8 +588,8 @@ async function run() {
   });
   await cdp.send("Page.reload", { ignoreCache: true });
   await waitForPage(cdp, `document.querySelectorAll("#tbody tr").length===3`);
-  await cdp.evaluate(`document.querySelector("#btnCompare").click()`);
-  await waitForPage(cdp, `marketChart?.data?.datasets?.length>=3`, 30000);
+  // 先在「單一資產」檢視量測主圖版面（比較面板會佔用主圖區，故主圖版面在非比較模式量測）
+  await waitForPage(cdp, `chartView!=="compare" && chart?.data?.datasets?.length>=1 && document.querySelector("#chartHint").style.display==="none"`, 30000);
   const mobile = await cdp.evaluate(`({
     viewport:innerWidth,
     viewportHeight:innerHeight,
@@ -606,11 +620,7 @@ async function run() {
     chartBottomSpace:Math.round(chart.height-chart.chartArea.bottom),
     chartXAxisPadding:chart.options.scales.x.ticks.padding,
     chartXAxisMaxRotation:chart.options.scales.x.ticks.maxRotation,
-    mainChartFontSize:chart.options.scales.x.ticks.font.size,
-    dialogWidth:Math.round(document.querySelector("#dlgMarket").getBoundingClientRect().width),
-    chartWidth:document.querySelector("#marketHistoryChart").width,
-    chartHeight:document.querySelector("#marketHistoryChart").height,
-    compareChartFontSize:marketChart.options.scales.x.ticks.font.size
+    mainChartFontSize:chart.options.scales.x.ticks.font.size
   })`);
   assert.equal(mobile.viewport, 390);
   assert.equal(mobile.bodyWidth, 390);
@@ -638,10 +648,22 @@ async function run() {
   assert.ok(mobile.chartXAxisPadding >= 10);
   assert.ok(mobile.chartXAxisMaxRotation <= 30);
   assert.ok(mobile.mainChartFontSize >= 13);
-  assert.ok(mobile.dialogWidth <= 390);
-  assert.ok(mobile.chartWidth > 300);
-  assert.ok(mobile.chartHeight > 250);
-  assert.ok(mobile.compareChartFontSize >= 13);
+
+  // 手機版比較檢視：開啟後重疊折線畫在主畫布、內嵌面板顯示、字級足夠大
+  await cdp.evaluate(`document.querySelector("#btnCompare").click()`);
+  await waitForPage(cdp, `chartView==="compare" && chart?.data?.datasets?.length>=3`, 30000);
+  const compareMobile = await cdp.evaluate(`({
+    panelVisible:!document.querySelector("#comparePanel").hidden,
+    canvasWidth:document.querySelector("#chartCanvas").width,
+    canvasHeight:document.querySelector("#chartCanvas").height,
+    fontSize:chart.options.scales.x.ticks.font.size,
+    datasets:chart.data.datasets.length
+  })`);
+  assert.equal(compareMobile.panelVisible, true);
+  assert.ok(compareMobile.canvasWidth > 300);
+  assert.ok(compareMobile.canvasHeight > 200);
+  assert.ok(compareMobile.fontSize >= 13);
+  assert.ok(compareMobile.datasets >= 3);
   const persistedColorSwap = await cdp.evaluate(`({
     setting:JSON.parse(localStorage.getItem("fund_tracker_settings")).swapGainLossColors,
     attribute:document.body.dataset.colorSwap,
@@ -676,6 +698,7 @@ async function run() {
     colorsAfterSwap,
     persistedColorSwap,
     mobile,
+    compareMobile,
   }, null, 2));
 }
 
