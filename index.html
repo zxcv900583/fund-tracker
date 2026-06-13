@@ -140,14 +140,13 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
 #fundPicker,#marketPicker{display:flex;flex-wrap:wrap;gap:5px}
 .market-pick{display:flex;align-items:center;gap:5px;padding:3px 7px;border:1px solid var(--border);border-radius:6px;background:var(--panel2);font-size:12px;cursor:pointer;white-space:nowrap}
 .market-pick:has(input:checked){border-color:var(--accent);background:var(--sel)}
-/* ===== 內嵌比較面板 ===== */
-#comparePanel{flex:none;position:relative;border-bottom:1px solid var(--border);padding:7px 10px;background:var(--panel2)}
+/* ===== 內嵌比較面板（選擇器移到 #dlgCompare 彈窗） ===== */
+#comparePanel{flex:none;border-bottom:1px solid var(--border);padding:7px 10px;background:var(--panel2)}
 #comparePanel .cmp-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-#comparePopover{position:absolute;left:8px;right:8px;top:100%;z-index:20;margin-top:2px;max-height:46vh;overflow:auto;padding:10px;background:var(--panel);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);display:flex;flex-direction:column;gap:8px}
 .cmp-group{display:flex;align-items:flex-start;gap:6px}
-.cmp-lbl{flex:none;font-size:11px;font-weight:700;color:var(--muted);padding-top:5px;min-width:30px}
+.cmp-lbl{flex:none;font-size:12px;font-weight:700;color:var(--muted);padding-top:5px;min-width:34px}
 #marketHistoryStatus{min-height:16px;margin-top:5px;font-size:12px;color:var(--muted)}
-#btnComparePick.toggle-on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+#comparePickCount{font-weight:700;color:var(--accent)}
 /* mobile */
 @media (max-width:640px){
   body{font-size:15px;overflow:auto;padding-bottom:76px}
@@ -269,14 +268,10 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
     <div class="cmp-row">
       <div class="tabs" id="marketRanges"></div>
       <span class="spacer" style="flex:1"></span>
-      <button class="btn" id="btnComparePick" aria-expanded="false" aria-controls="comparePopover" title="選擇要比較的基金與市場">選擇資產 ▾</button>
+      <button class="btn" id="btnComparePick" title="選擇要比較的基金與市場">選擇資產 ▾</button>
       <button class="btn" id="btnMarketHistoryRefresh" title="重新抓取市場歷史">⟳</button>
     </div>
     <div id="marketHistoryStatus"></div>
-    <div id="comparePopover" hidden>
-      <div class="cmp-group"><span class="cmp-lbl">庫存</span><div id="fundPicker"></div></div>
-      <div class="cmp-group"><span class="cmp-lbl">市場</span><div id="marketPicker"></div></div>
-    </div>
   </div>
   <div id="chartWrap">
     <canvas id="chartCanvas"></canvas>
@@ -460,6 +455,20 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
   </div>
 </dialog>
 
+<!-- ===== 比較資產選擇 Dialog ===== -->
+<dialog id="dlgCompare" style="width:min(820px,96vw);max-width:96vw">
+  <div class="dlgHead"><span>選擇比較資產</span><button class="xBtn" data-close="dlgCompare">✕</button></div>
+  <div class="dlgBody">
+    <div class="note" style="margin:0 0 10px">最多選 6 項；所有走勢以共同可比較起始日為 0%，避免不同成立日造成誤判。<span id="comparePickCount"></span></div>
+    <div class="cmp-group"><span class="cmp-lbl">庫存</span><div id="fundPicker"></div></div>
+    <div class="cmp-group" style="margin-top:10px"><span class="cmp-lbl">市場</span><div id="marketPicker"></div></div>
+  </div>
+  <div class="dlgFoot">
+    <button class="btn" data-close="dlgCompare">取消</button>
+    <button class="btn primary" id="btnCompareConfirm">確定</button>
+  </div>
+</dialog>
+
 <!-- ===== CSV 匯入 Dialog ===== -->
 <dialog id="dlgCsv" style="width:min(820px,96vw);max-width:96vw">
   <div class="dlgHead"><span>CSV 匯入 / 匯出</span><button class="xBtn" data-close="dlgCsv">✕</button></div>
@@ -524,6 +533,10 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
    v1.11 修正三項：①手機按比較看不到圖（面板區間 tabs 改水平捲動壓低高度、
          自動捲動改在圖載入後捲到圖表置中）②Y 軸上方緩衝改動態（末端急拉時多留 18%，
          峰值不再頂到上緣）③移除頂部多餘的比較按鈕（保留圖表列⚖比較與持倉列比較）
+   v1.12 三項：①各國市場/股票休市標籤（Worker v8 報價帶出當日交易時段 session，
+         前端用 現在 vs 該市場時段 判斷交易中/休市，含時區與假日）②比較選擇改為彈窗
+         ＋確定（勾選清單移入 #dlgCompare，底部只留區間＋圖，不再覆蓋圖）
+         ③新增「成立至今」區間（比較與單一資產皆用各資產最早資料起算）
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
@@ -560,7 +573,7 @@ const MARKET_INDICES = [
 const MARKET_RANGES = [
   ["1日","1bd"],["2日","2bd"],["5日","5bd"],["21日","21bd"],
   ["1月","1mo"],["3月","3mo"],["6月","6mo"],["1年","1y"],
-  ["2年","2y"],["5年","5y"],["10年","10y"]
+  ["2年","2y"],["5年","5y"],["10年","10y"],["成立至今","incep"]
 ];
 const COMPARE_COLORS = ["#2563eb","#f59e0b","#16a34a","#dc2626","#9333ea","#0891b2"];
 const MAX_COMPARE = 6;
@@ -624,12 +637,13 @@ let apiDiagnostics = {fundSearch:null,fundHistory:null,tdcc:null,market:null};
 let picked = null;                 // 搜尋選中的基金
 let pickedStock = null;
 let mngHoldingId = null, editPurId = null, editDivId = null;
-let chartView = "fund";            // fund | portfolio
+let chartView = "fund";            // fund | portfolio | compare
+let quoteSessions = {};            // symbol → {start,end} 交易時段（供持倉列顯示各市場狀態）
 
 const RANGES = [
   ["1D",0,1],["2D",0,2],["3D",3],["5D",0,5],["7D",7],["14D",14],["21D",0,21],
   ["1M",30],["2M",60],["3M",90],["6M",180],["1Y",365],["2Y",730],["3Y",1095],
-  ["5Y",1825],["10Y",3650],["自訂",0]
+  ["5Y",1825],["10Y",3650],["成立至今",36500],["自訂",0]
 ];
 const SHORT_TRADING_RANGES = Object.fromEntries(
   RANGES.filter(([, ,businessDays])=>businessDays).map(([label,,businessDays])=>[label,businessDays])
@@ -775,6 +789,7 @@ async function stockQuoteLatest(symbol){
   const payload = await marketFetch(`/api/yahoo/quotes?symbols=${encodeURIComponent(symbol)}`, 20000);
   const q = (payload.quotes||[]).find(x=>x.symbol===symbol && Number.isFinite(x.price) && x.price>0);
   if(!q) return null;
+  if(q.session) quoteSessions[symbol] = q.session;   // 暫存交易時段供持倉列顯示各市場狀態
   // 日期沿用 chart 的 UTC 慣例（parseMarketHistory 也用 toISOString），確保最新點與歷史同日期 key
   const date = Number.isFinite(q.marketTime)
     ? new Date(q.marketTime*1000).toISOString().slice(0,10)
@@ -865,13 +880,22 @@ function tradingDateText(unixTime, timeZone="Asia/Taipei"){
   }).format(new Date(unixTime*1000));
 }
 
+// 依 Yahoo 提供的當日交易時段（quote.session，含各市場時區與假日）判斷狀態
+function sessionStatusFromQuote(quote){
+  const s = quote?.session;
+  if(!s || !Number.isFinite(s.start) || !Number.isFinite(s.end)) return null;
+  const now = Date.now()/1000;
+  if(now < s.start) return {label:"未開盤", className:"closed"};
+  if(now <= s.end) return {label:"交易中", className:"open"};
+  return {label:"已休市", className:"closed"};
+}
+
 function marketSessionHtml(item, quote){
   const date = tradingDateText(quote?.marketTime);
-  if(item.market==="TW"){
-    const session = taiwanSessionStatus();
-    return `<span class="market-session">交易日 ${esc(date||"—")} · <span class="session-label ${session.className}" title="依台北時間平日 09:00–13:30 判斷，國定假日無法偵測">${session.label}</span></span>`;
-  }
-  return `<span class="market-session">交易日 ${esc(date||"—")}</span>`;
+  // 各國市場一律用 Yahoo 真實交易時段；TWSE 備援（無 session）時退回台股時段判斷
+  const session = sessionStatusFromQuote(quote) || (item.market==="TW" ? taiwanSessionStatus() : null);
+  const label = session ? ` · <span class="session-label ${session.className}" title="依該市場當日交易時段判斷">${session.label}</span>` : "";
+  return `<span class="market-session">交易日 ${esc(date||"—")}${label}</span>`;
 }
 
 function renderCombinedUpdateStatus(fundHtml=null){
@@ -983,8 +1007,8 @@ function parseMarketHistory(payload){
 
 async function fetchMarketHistory(symbol, range, force=false){
   const businessDays = marketBusinessDays(range);
-  const upstreamRange = businessDays>=21 ? "3mo" : (businessDays ? "1mo" : range);
-  const interval = upstreamRange==="10y" ? "1wk" : "1d";
+  const upstreamRange = range==="incep" ? "max" : (businessDays>=21 ? "3mo" : (businessDays ? "1mo" : range));
+  const interval = (upstreamRange==="10y"||upstreamRange==="max") ? "1wk" : "1d";
   const cacheKey = `${symbol}|${range}|${interval}`;
   if(!force && marketHistoryCache.has(cacheKey)) return marketHistoryCache.get(cacheKey);
   const payload = await marketFetch(`/api/yahoo/chart?symbol=${encodeURIComponent(symbol)}&range=${upstreamRange}&interval=${interval}`, 30000);
@@ -1039,13 +1063,17 @@ function updateComparePickLabel(){
   const n = compareSelectionCount();
   btn.textContent = `選擇資產（已選 ${n}）▾`;
 }
-function toggleComparePopover(show){
-  const pop = $("#comparePopover"), btn = $("#btnComparePick");
-  if(!pop || !btn) return;
-  const open = show===undefined ? pop.hidden : show;
-  pop.hidden = !open;
-  btn.setAttribute("aria-expanded", String(open));
-  btn.classList.toggle("toggle-on", open);
+// 計算比較彈窗內目前勾選數，更新提示（不影響全域選擇，按「確定」才套用）
+function updateComparePickCount(){
+  const n = document.querySelectorAll("#dlgCompare input:checked").length;
+  const el = $("#comparePickCount");
+  if(el) el.textContent = `（已選 ${n}/${MAX_COMPARE}）`;
+  return n;
+}
+function openCompareDialog(){
+  renderMarketControls();        // 依目前選擇渲染勾選狀態
+  updateComparePickCount();
+  $("#dlgCompare").showModal();
 }
 
 function renderMarketHistoryChart(series){
@@ -1122,6 +1150,7 @@ function renderMarketHistoryChart(series){
 }
 
 function compareRangeStart(){
+  if(marketRange==="incep") return "1900-01-01";   // 成立至今：不限制起始，用各資產全部歷史
   const days = { "1mo":31, "3mo":93, "6mo":186, "1y":366, "2y":732, "5y":1830, "10y":3660 };
   return addDays(todayStr(), -(days[marketRange]||366));
 }
@@ -1215,7 +1244,6 @@ function enterCompareView(symbol=null, fundId=null){
   }
   chartView = "compare";
   renderMarketControls();
-  toggleComparePopover(false);   // 進入時下拉預設收合，圖表最大化
   applyChartViewChrome();
   // 等比較圖載入完成後再捲動，並捲到圖表本身置中（手機版避免停在控制項看不到圖）
   loadMarketHistory(false).then(()=>{
@@ -1588,9 +1616,13 @@ function rangeReturn(h){
 function holdingPriceMetaHtml(h,date){
   if(!date) return '<span class="price-meta">尚無資料</span>';
   const label = h.assetType==="stock" ? "交易日" : "淨值日";
-  if(h.assetType==="stock" && /\.(TW|TWO)$/.test(h.symbol||h.fundCode)){
-    const session = taiwanSessionStatus();
-    return `<span class="price-meta">${label} ${esc(date.replaceAll("-","/"))} · <span class="session-label ${session.className}" title="依台北時間平日 09:00–13:30 判斷，國定假日無法偵測">${session.label}</span></span>`;
+  if(h.assetType==="stock"){
+    const sym = h.symbol||h.fundCode;
+    // 各市場用 Yahoo 交易時段；台股無 session 時退回台股時段判斷
+    const session = sessionStatusFromQuote({session:quoteSessions[sym]})
+      || (/\.(TW|TWO)$/.test(sym) ? taiwanSessionStatus() : null);
+    if(session)
+      return `<span class="price-meta">${label} ${esc(date.replaceAll("-","/"))} · <span class="session-label ${session.className}" title="依該市場當日交易時段判斷">${session.label}</span></span>`;
   }
   return `<span class="price-meta">${label} ${esc(date.replaceAll("-","/"))}</span>`;
 }
@@ -1712,10 +1744,10 @@ function renderTabs(){
     ? Math.max(0,...holdings.map(h=>getCache(h).navHistory.length))
     : (selected?getCache(selected).navHistory.length:0);
   $("#rangeTabs").innerHTML = RANGES.map(([k,days,businessDays])=>{
-    const dis = k!=="自訂" && (
+    const dis = k!=="自訂" && k!=="成立至今" && (
       businessDays ? availablePoints<businessDays+1 : (span>0 && days>span+40)
     );
-    const title = businessDays ? `${businessDays} 個營業日` : k;
+    const title = businessDays ? `${businessDays} 個營業日` : (k==="成立至今"?"從最早資料起算":k);
     return `<button class="tab${k===curRange?" on":""}" data-r="${k}" title="${title}" ${dis?"disabled":""}>${k}</button>`;
   }).join("");
 }
@@ -2858,37 +2890,29 @@ $("#marketBar").onclick = event=>{
   const marketButton = event.target.closest("[data-market-symbol]");
   if(marketButton) enterCompareView(marketButton.dataset.marketSymbol);
 };
-$("#marketPicker").onchange = event=>{
-  const input = event.target.closest("input[data-market-pick]");
+// 彈窗內勾選：僅在彈窗內即時計數與限制最多 6 項，按「確定」才套用到圖表
+function onComparePickChange(event){
+  const input = event.target.closest("input[data-market-pick],input[data-fund-pick]");
   if(!input) return;
-  const symbol = input.dataset.marketPick;
-  if(input.checked){
-    if(!addCompareSelection("market",symbol)){
-      input.checked = false;
-      return;
-    }
-  }else{
-    marketSelection = marketSelection.filter(value=>value!==symbol);
-    persistMarketSettings();
+  if(input.checked && updateComparePickCount()>MAX_COMPARE){
+    input.checked = false;
+    toast(`最多同時比較 ${MAX_COMPARE} 個基金或市場`);
   }
-  renderMarketControls();
-  loadMarketHistory(false);
-};
-$("#fundPicker").onchange = event=>{
-  const input = event.target.closest("input[data-fund-pick]");
-  if(!input) return;
-  const id = input.dataset.fundPick;
-  if(input.checked){
-    if(!addCompareSelection("fund",id)){
-      input.checked = false;
-      return;
-    }
-  }else{
-    compareFundIds = compareFundIds.filter(value=>value!==id);
-    persistMarketSettings();
-  }
-  renderMarketControls();
-  loadMarketHistory(false);
+  updateComparePickCount();
+}
+$("#marketPicker").onchange = onComparePickChange;
+$("#fundPicker").onchange = onComparePickChange;
+$("#btnComparePick").onclick = openCompareDialog;
+$("#btnCompareConfirm").onclick = ()=>{
+  compareFundIds = [...document.querySelectorAll("#fundPicker input[data-fund-pick]:checked")].map(i=>i.dataset.fundPick).slice(0,MAX_COMPARE);
+  marketSelection = [...document.querySelectorAll("#marketPicker input[data-market-pick]:checked")].map(i=>i.dataset.marketPick).slice(0,MAX_COMPARE);
+  while(compareSelectionCount()>MAX_COMPARE) marketSelection.pop();
+  persistMarketSettings();
+  updateComparePickLabel();
+  $("#dlgCompare").close();
+  loadMarketHistory(false).then(()=>{
+    if(window.matchMedia("(max-width:640px)").matches) $("#chartWrap")?.scrollIntoView({behavior:"smooth",block:"center"});
+  }).catch(()=>{});
 };
 $("#marketRanges").onclick = event=>{
   const button = event.target.closest("[data-market-range]");
@@ -2899,12 +2923,6 @@ $("#marketRanges").onclick = event=>{
   loadMarketHistory(false);
 };
 $("#btnMarketHistoryRefresh").onclick = ()=>loadMarketHistory(true);
-$("#btnComparePick").onclick = (e)=>{ e.stopPropagation(); toggleComparePopover(); };
-// 點選擇器以外的地方關閉下拉（勾選框在 popover 內，不會誤關）
-document.addEventListener("click", (e)=>{
-  const pop = $("#comparePopover");
-  if(pop && !pop.hidden && !e.target.closest("#comparePopover") && !e.target.closest("#btnComparePick")) toggleComparePopover(false);
-});
 $("#btnTheme").onclick = ()=>{
   settings.theme = (document.body.dataset.theme==="light")?"dark":"light";
   document.body.dataset.theme = settings.theme;

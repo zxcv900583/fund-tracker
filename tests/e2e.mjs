@@ -400,7 +400,39 @@ async function run() {
   assert.deepEqual(comparisonBusinessDayPoints,[2,2,2]);
   await cdp.evaluate(`document.querySelector('#marketRanges [data-market-range="1y"]').click()`);
   await waitForPage(cdp, `chart?.data?.datasets?.every(dataset=>dataset.data.filter(Number.isFinite).length>20)`,30000);
-  console.log("[e2e] fund and market comparison passed");
+
+  // 比較選擇彈窗：點「選擇資產」開窗 → 取消第一檔基金 → 確定 → 走勢少一條
+  const beforePickerCount = await cdp.evaluate(`chart.data.datasets.length`);
+  await cdp.evaluate(`document.querySelector("#btnComparePick").click()`);
+  await waitForPage(cdp, `document.querySelector("#dlgCompare").open===true`);
+  const dlgInfo = await cdp.evaluate(`({
+    funds:document.querySelectorAll("#dlgCompare input[data-fund-pick]").length,
+    markets:document.querySelectorAll("#dlgCompare input[data-market-pick]").length,
+    count:document.querySelector("#comparePickCount").textContent,
+    hasIncepRange:!!document.querySelector('#marketRanges [data-market-range="incep"]')
+  })`);
+  assert.ok(dlgInfo.funds >= 2, `彈窗應有基金選項，實際 ${dlgInfo.funds}`);
+  assert.equal(dlgInfo.markets, 15);
+  assert.match(dlgInfo.count, /已選 \d+\/6/);
+  assert.ok(dlgInfo.hasIncepRange, "應有『成立至今』區間鈕");
+  await cdp.evaluate(`(()=>{const cb=document.querySelector("#dlgCompare input[data-fund-pick]:checked");cb.checked=false;cb.dispatchEvent(new Event("change",{bubbles:true}));})()`);
+  await cdp.evaluate(`document.querySelector("#btnCompareConfirm").click()`);
+  await waitForPage(cdp, `document.querySelector("#dlgCompare").open===false && chart?.data?.datasets?.length===${beforePickerCount - 1}`, 30000);
+  // 取消語意：開窗取消勾選但按取消 → 選擇不變
+  await cdp.evaluate(`document.querySelector("#btnComparePick").click()`);
+  await waitForPage(cdp, `document.querySelector("#dlgCompare").open===true`);
+  await cdp.evaluate(`(()=>{const cb=document.querySelector("#dlgCompare input[data-market-pick]:checked");if(cb){cb.checked=false;cb.dispatchEvent(new Event("change",{bubbles:true}));}document.querySelector('#dlgCompare [data-close="dlgCompare"]').click();})()`);
+  await waitForPage(cdp, `document.querySelector("#dlgCompare").open===false`);
+  const afterCancel = await cdp.evaluate(`chart.data.datasets.length`);
+  assert.equal(afterCancel, beforePickerCount - 1, "取消不應改變走勢數");
+  // 成立至今：切到 incep 仍有走勢
+  await cdp.evaluate(`document.querySelector('#marketRanges [data-market-range="incep"]').click()`);
+  await waitForPage(cdp, `marketRange==="incep" && chart?.data?.datasets?.length>=1 && chart.data.datasets.every(d=>d.data.filter(Number.isFinite).length>20)`, 30000);
+  await cdp.evaluate(`document.querySelector('#marketRanges [data-market-range="1y"]').click()`);
+  await waitForPage(cdp, `marketRange==="1y"`, 30000);
+  // 還原比較選擇，供後續跨資產段沿用（避免測試間相依）
+  await cdp.evaluate(`(()=>{ compareFundIds=["holding_a","holding_b"]; marketSelection=["^GSPC"]; persistMarketSettings(); })()`);
+  console.log("[e2e] fund and market comparison passed (dialog + incep)");
 
   // 切回單一資產檢視（點表格列），確認比較面板收起
   await cdp.evaluate(`[...document.querySelectorAll("#tbody tr[data-id]")][0].click()`);

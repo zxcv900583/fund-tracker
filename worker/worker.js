@@ -132,7 +132,7 @@ async function handleHealth(requestUrl, env, request) {
   const base = {
     status: "ok",
     service: "fund-tracker-market-api",
-    version: 7,
+    version: 8,
     cloudflareProxy: true,
     kvConfigured: Boolean(env.MARKET_CACHE),
     fallbackOrder: ["yahoo-query1", "yahoo-query2", "twse-for-taiwan", "cloudflare-kv-stale"],
@@ -903,6 +903,12 @@ function normalizeQuote(symbol, payload) {
     throw new Error("No valid price found");
   }
 
+  // 當日正規交易時段（unix 秒），供前端判斷各市場 交易中／休市（含時區與假日，由 Yahoo 提供）
+  const tp = meta.currentTradingPeriod?.regular;
+  const session = (tp && Number.isFinite(tp.start) && Number.isFinite(tp.end))
+    ? { start: tp.start, end: tp.end }
+    : null;
+
   return {
     symbol,
     price: finalPrice,
@@ -910,6 +916,7 @@ function normalizeQuote(symbol, payload) {
     currency: meta.currency || null,
     exchange: meta.exchangeName || null,
     marketTime: finalTime || null,
+    session,
   };
 }
 
@@ -961,7 +968,7 @@ async function putCache(env, key, value, signature = null) {
 }
 
 function quoteSignature(quote) {
-  return `q:${quote.price}|${quote.previousClose}|${quote.marketTime}`;
+  return `q:${quote.price}|${quote.previousClose}|${quote.marketTime}|${quote.session?.start ?? ""}`;
 }
 
 async function getCache(env, key) {

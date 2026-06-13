@@ -1,10 +1,16 @@
 # 基金追蹤分析軟體 — 產品規格書
 
-**版本：** v1.11（前端）／Worker v7<br>
+**版本：** v1.12（前端）／Worker v8<br>
 **日期：** 2026-06-13（v1.1：2026-06-11；v1.0：2026-06-10）<br>
 **作者：** Chan
 
 ---
+
+## v1.12 更新摘要（2026-06-13）
+
+- **各國市場/股票休市標籤**：Worker 升級 v8，報價端點 `normalizeQuote` 帶出 Yahoo `currentTradingPeriod.regular` 當日交易時段（`session:{start,end}` unix 秒）。前端 `sessionStatusFromQuote` 以「現在 vs 該市場交易時段」判斷 交易中／未開盤／已休市，**所有市場**與股票持倉皆套用（自動含各國時區與假日；TWSE 備援無 session 時退回台股時段判斷）。
+- **比較選擇改為彈窗＋確定**：勾選清單（庫存／市場）移入 `#dlgCompare` 對話框，按「確定」才套用到底部圖表；底部比較面板只保留區間 tabs＋「選擇資產（已選 N）▾」＋狀態，選擇器不再覆蓋圖表（解決手機被擋住問題）。按「取消」捨棄變更。
+- **新增「成立至今」區間**：比較區間（`incep`，市場以 Yahoo `range=max` 取得）與單一資產區間（`成立至今`）皆以各資產最早可得資料起算；比較圖以共同可比較起始日對齊。
 
 ## v1.11 更新摘要（2026-06-13）
 
@@ -51,7 +57,9 @@
 
 ---
 
-## Worker 安全設計（v7）
+## Worker 安全設計（v8）
+
+> v8：報價 `normalizeQuote` 另帶出 `session:{start,end}`（Yahoo `currentTradingPeriod.regular`），供前端顯示各市場休市標籤。
 
 > 原始碼為乾淨 ES module（非 esbuild 打包產物），可直接 `wrangler dev` / `wrangler deploy`；部署位置 `https://fund-tracker-proxy.fund-tracker-proxy.workers.dev`。
 

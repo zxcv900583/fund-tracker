@@ -85,7 +85,7 @@ async function run() {
   const health = await request("/health?deep=1");
   assert.equal(health.response.status, 200);
   assert.equal(health.body.status, "ok");
-  assert.equal(health.body.version, 7);
+  assert.equal(health.body.version, 8);
   assert.equal(health.body.cloudflareProxy, true);
   assert.equal(health.body.kvConfigured, true);
   assert.ok(health.body.checks.length >= 7);
@@ -108,6 +108,12 @@ async function run() {
   const quoteErrors = quotes.body.quotes.filter((quote) => quote.error || !(quote.price > 0));
   assert.deepEqual(quoteErrors, []);
   assert.ok(quotes.body.sources.length >= 1);
+  // 報價含當日交易時段（供各市場休市標籤）；至少多數有 session
+  const gspc = quotes.body.quotes.find((quote) => quote.symbol === "^GSPC");
+  assert.ok(gspc.session && Number.isFinite(gspc.session.start) && Number.isFinite(gspc.session.end),
+    `^GSPC 應含 session：${JSON.stringify(gspc.session)}`);
+  const withSession = quotes.body.quotes.filter((quote) => quote.session && quote.session.end > 0).length;
+  assert.ok(withSession >= 10, `至少 10 檔應含交易時段，實際 ${withSession}`);
 
   const stockChart = await request("/api/yahoo/chart?symbol=2330.TW&range=10y&interval=1wk");
   assert.equal(stockChart.response.status, 200);
