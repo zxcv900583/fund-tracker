@@ -274,7 +274,7 @@ async function run() {
     fundChartPoints:chart?.data?.datasets?.[0]?.data?.filter(Number.isFinite).length || 0,
     workerBase:MARKET_API
   })`);
-  assert.equal(initial.marketCards, 16);
+  assert.equal(initial.marketCards, 15);   // ^TWOII（櫃買）已停用：Yahoo 無穩定報價
   assert.equal(initial.tableRows, 2);
   assert.equal(initial.compareButtons, 2);
   assert.equal(initial.priceHeading, "目前價格");
