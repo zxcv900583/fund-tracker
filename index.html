@@ -24,8 +24,8 @@
 [data-color-swap="true"]{--up:#dc2626;--down:#16a34a}
 [data-theme="dark"][data-color-swap="true"]{--up:#ef4444;--down:#22c55e}
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%}
-body{font-family:"Segoe UI","Microsoft JhengHei",system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;display:flex;flex-direction:column;overflow:hidden}
+html,body{min-height:100vh}
+body{font-family:"Segoe UI","Microsoft JhengHei",system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;display:flex;flex-direction:column}
 button{font-family:inherit;cursor:pointer}
 /* ===== Header ===== */
 header{background:var(--panel);border-bottom:1px solid var(--border);padding:8px 14px;flex:none}
@@ -47,7 +47,7 @@ header{background:var(--panel);border-bottom:1px solid var(--border);padding:8px
 .pos{color:var(--up)} .neg{color:var(--down)} .flat{color:var(--flat)}
 #updStatus{font-size:11px;color:var(--muted);margin-left:auto;align-self:flex-end}
 /* ===== Table ===== */
-#tableWrap{flex:1 1 55%;overflow:auto;background:var(--panel);min-height:120px}
+#tableWrap{flex:none;max-height:46vh;overflow:auto;background:var(--panel);min-height:140px}
 table{width:100%;border-collapse:collapse;white-space:nowrap}
 thead th{position:sticky;top:0;background:var(--panel2);border-bottom:1px solid var(--border);padding:8px 10px;font-size:13px;color:var(--muted);font-weight:600;cursor:pointer;user-select:none;z-index:2;text-align:right}
 thead th:first-child{text-align:left}
@@ -70,7 +70,7 @@ tbody tr.sel{background:var(--sel)}
 #emptyHint{padding:34px;text-align:center;color:var(--muted)}
 #emptyHint .big{font-size:15px;margin-bottom:8px}
 /* ===== Chart area ===== */
-#chartArea{flex:1 1 45%;display:flex;flex-direction:column;background:var(--panel);border-top:2px solid var(--border);min-height:240px}
+#chartArea{flex:1 1 auto;display:flex;flex-direction:column;background:var(--panel);border-top:2px solid var(--border);min-height:62vh}
 #chartBar{display:flex;align-items:center;gap:6px;padding:8px 10px;flex-wrap:wrap;border-bottom:1px solid var(--border)}
 #chartTitle{font-size:15px;font-weight:700;margin-right:6px;max-width:330px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tabs{display:flex;gap:4px;flex-wrap:wrap}
@@ -141,12 +141,13 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
 .market-pick{display:flex;align-items:center;gap:5px;padding:3px 7px;border:1px solid var(--border);border-radius:6px;background:var(--panel2);font-size:12px;cursor:pointer;white-space:nowrap}
 .market-pick:has(input:checked){border-color:var(--accent);background:var(--sel)}
 /* ===== 內嵌比較面板 ===== */
-#comparePanel{flex:none;border-bottom:1px solid var(--border);padding:7px 10px;background:var(--panel2);max-height:32vh;overflow:auto}
-#comparePanel .cmp-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:7px}
-#comparePickers{display:flex;flex-direction:column;gap:6px}
+#comparePanel{flex:none;position:relative;border-bottom:1px solid var(--border);padding:7px 10px;background:var(--panel2)}
+#comparePanel .cmp-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+#comparePopover{position:absolute;left:8px;right:8px;top:100%;z-index:20;margin-top:2px;max-height:46vh;overflow:auto;padding:10px;background:var(--panel);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);display:flex;flex-direction:column;gap:8px}
 .cmp-group{display:flex;align-items:flex-start;gap:6px}
 .cmp-lbl{flex:none;font-size:11px;font-weight:700;color:var(--muted);padding-top:5px;min-width:30px}
-#marketHistoryStatus{min-height:18px;margin-top:7px;font-size:12px;color:var(--muted)}
+#marketHistoryStatus{min-height:16px;margin-top:5px;font-size:12px;color:var(--muted)}
+#btnComparePick.toggle-on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
 /* mobile */
 @media (max-width:640px){
   body{font-size:15px;overflow:auto;padding-bottom:76px}
@@ -265,13 +266,14 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
     <div class="cmp-row">
       <div class="tabs" id="marketRanges"></div>
       <span class="spacer" style="flex:1"></span>
-      <button class="btn" id="btnMarketHistoryRefresh" title="重新抓取市場歷史">⟳ 重新抓取</button>
+      <button class="btn" id="btnComparePick" aria-expanded="false" aria-controls="comparePopover" title="選擇要比較的基金與市場">選擇資產 ▾</button>
+      <button class="btn" id="btnMarketHistoryRefresh" title="重新抓取市場歷史">⟳</button>
     </div>
-    <div id="comparePickers">
+    <div id="marketHistoryStatus"></div>
+    <div id="comparePopover" hidden>
       <div class="cmp-group"><span class="cmp-lbl">庫存</span><div id="fundPicker"></div></div>
       <div class="cmp-group"><span class="cmp-lbl">市場</span><div id="marketPicker"></div></div>
     </div>
-    <div id="marketHistoryStatus"></div>
   </div>
   <div id="chartWrap">
     <canvas id="chartCanvas"></canvas>
@@ -513,6 +515,9 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
    v1.9 比較功能改為主圖區內嵌檢視：移除彈窗，新增「⚖ 比較」檢視（與「組合」並列），
         重疊折線直接畫在主畫布，選擇器與區間 tabs 內嵌於圖表上方面板，
         在視窗內即可邊看清單邊比較，不再開彈窗
+   v1.10 版面優化：比較選擇器改為下拉浮動式（「選擇資產 ▾」點開才浮出勾選清單、
+         覆蓋在圖上不佔高度）；桌面改為可向下捲動、圖表區拉高（min-height 62vh），
+         比較面板從約 150px 縮為單行，重疊折線圖高度大幅增加
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
@@ -1019,6 +1024,22 @@ function renderMarketControls(){
   $("#marketRanges").innerHTML = MARKET_RANGES.map(([label,value])=>
     `<button class="tab${marketRange===value?" on":""}" data-market-range="${value}">${label}</button>`
   ).join("");
+  updateComparePickLabel();
+}
+
+// 更新「選擇資產」下拉按鈕上的已選數量
+function updateComparePickLabel(){
+  const btn = $("#btnComparePick"); if(!btn) return;
+  const n = compareSelectionCount();
+  btn.textContent = `選擇資產（已選 ${n}）▾`;
+}
+function toggleComparePopover(show){
+  const pop = $("#comparePopover"), btn = $("#btnComparePick");
+  if(!pop || !btn) return;
+  const open = show===undefined ? pop.hidden : show;
+  pop.hidden = !open;
+  btn.setAttribute("aria-expanded", String(open));
+  btn.classList.toggle("toggle-on", open);
 }
 
 function renderMarketHistoryChart(series){
@@ -1188,6 +1209,7 @@ function enterCompareView(symbol=null, fundId=null){
   }
   chartView = "compare";
   renderMarketControls();
+  toggleComparePopover(false);   // 進入時下拉預設收合，圖表最大化
   applyChartViewChrome();
   loadMarketHistory(false);
   // 手機版捲動到圖表區，方便直接看比較結果
@@ -2856,6 +2878,12 @@ $("#marketRanges").onclick = event=>{
   loadMarketHistory(false);
 };
 $("#btnMarketHistoryRefresh").onclick = ()=>loadMarketHistory(true);
+$("#btnComparePick").onclick = (e)=>{ e.stopPropagation(); toggleComparePopover(); };
+// 點選擇器以外的地方關閉下拉（勾選框在 popover 內，不會誤關）
+document.addEventListener("click", (e)=>{
+  const pop = $("#comparePopover");
+  if(pop && !pop.hidden && !e.target.closest("#comparePopover") && !e.target.closest("#btnComparePick")) toggleComparePopover(false);
+});
 $("#btnTheme").onclick = ()=>{
   settings.theme = (document.body.dataset.theme==="light")?"dark":"light";
   document.body.dataset.theme = settings.theme;
