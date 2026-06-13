@@ -156,7 +156,7 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
   .hd-top h1{font-size:17px}
   .utility-actions{margin-left:auto;gap:4px}
   .utility-actions .btn{padding:6px 8px;min-height:34px}
-  .action-dock{position:fixed;left:0;right:0;bottom:0;z-index:50;display:grid;grid-template-columns:repeat(5,1fr);gap:4px;padding:7px max(7px,env(safe-area-inset-right)) calc(7px + env(safe-area-inset-bottom)) max(7px,env(safe-area-inset-left));background:color-mix(in srgb,var(--panel) 94%,transparent);border-top:1px solid var(--border);box-shadow:0 -5px 18px rgba(0,0,0,.12);backdrop-filter:blur(10px)}
+  .action-dock{position:fixed;left:0;right:0;bottom:0;z-index:50;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:7px max(7px,env(safe-area-inset-right)) calc(7px + env(safe-area-inset-bottom)) max(7px,env(safe-area-inset-left));background:color-mix(in srgb,var(--panel) 94%,transparent);border-top:1px solid var(--border);box-shadow:0 -5px 18px rgba(0,0,0,.12);backdrop-filter:blur(10px)}
   .action-dock .btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:5px 2px;min-width:0;min-height:52px;font-size:17px}
   .action-dock .btn-label{display:block;margin:0;font-size:10px;line-height:1.1}
   .summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 10px;overflow:visible;padding-bottom:2px}
@@ -189,6 +189,10 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
   input[type=text],input[type=number],input[type=date],select{font-size:16px;min-height:42px}
   #comparePanel{max-height:40vh}
   #comparePanel .market-pick{font-size:13px;padding:5px 9px}
+  /* 區間 tabs 改水平捲動不換行，壓低面板高度，讓圖表有更多空間 */
+  #comparePanel #marketRanges{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin;-webkit-overflow-scrolling:touch}
+  #comparePanel .cmp-row{flex-wrap:nowrap}
+  #comparePanel #marketRanges .tab{flex:none}
 }
 </style>
 </head>
@@ -202,7 +206,6 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
       <button class="btn primary" id="btnAddStock" title="新增股票或 ETF">＋<span class="btn-label">股票</span></button>
       <button class="btn" id="btnRefresh" title="依 API 最新資料更新基金淨值與股票價格">⟳<span class="btn-label">更新淨值</span></button>
       <button class="btn" id="btnMarketRefresh" title="更新全球股市">⟳<span class="btn-label">股市更新</span></button>
-      <button class="btn" id="btnCompare" title="比較庫存基金與全球市場">↗<span class="btn-label">比較</span></button>
     </div>
     <span class="spacer"></span>
     <div class="utility-actions">
@@ -518,6 +521,9 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
    v1.10 版面優化：比較選擇器改為下拉浮動式（「選擇資產 ▾」點開才浮出勾選清單、
          覆蓋在圖上不佔高度）；桌面改為可向下捲動、圖表區拉高（min-height 62vh），
          比較面板從約 150px 縮為單行，重疊折線圖高度大幅增加
+   v1.11 修正三項：①手機按比較看不到圖（面板區間 tabs 改水平捲動壓低高度、
+         自動捲動改在圖載入後捲到圖表置中）②Y 軸上方緩衝改動態（末端急拉時多留 18%，
+         峰值不再頂到上緣）③移除頂部多餘的比較按鈕（保留圖表列⚖比較與持倉列比較）
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
@@ -1108,7 +1114,7 @@ function renderMarketHistoryChart(series){
       },
       scales:{
         x:{ticks:chartXAxisTicks(textColor,fontSize),grid:{color:gridColor}},
-        y:{position:"right",grace:"8%",ticks:{color:textColor,callback:value=>signed(value,1,"%"),font:{size:fontSize}},grid:{color:gridColor}}
+        y:{position:"right",...chartYHeadroom(datasets.flatMap(d=>d.data)),ticks:{color:textColor,callback:value=>signed(value,1,"%"),font:{size:fontSize}},grid:{color:gridColor}}
       }
     }
   });
@@ -1211,9 +1217,11 @@ function enterCompareView(symbol=null, fundId=null){
   renderMarketControls();
   toggleComparePopover(false);   // 進入時下拉預設收合，圖表最大化
   applyChartViewChrome();
-  loadMarketHistory(false);
-  // 手機版捲動到圖表區，方便直接看比較結果
-  if(window.matchMedia("(max-width:640px)").matches) $("#chartArea")?.scrollIntoView({behavior:"smooth",block:"start"});
+  // 等比較圖載入完成後再捲動，並捲到圖表本身置中（手機版避免停在控制項看不到圖）
+  loadMarketHistory(false).then(()=>{
+    if(chartView==="compare" && window.matchMedia("(max-width:640px)").matches)
+      $("#chartWrap")?.scrollIntoView({behavior:"smooth",block:"center"});
+  }).catch(()=>{});
 }
 
 // 依目前 chartView 切換主圖列控制項與比較面板的顯示
@@ -1726,6 +1734,20 @@ function chartLayoutPadding(){
     : {bottom:10};
 }
 
+// 動態上下緩衝：折線末端急拉到峰值時，上方多留空間，避免最高點頂到上緣被切
+function chartYHeadroom(values){
+  const finite = (values||[]).filter(Number.isFinite);
+  if(finite.length<2) return {};
+  const max = Math.max(...finite), min = Math.min(...finite);
+  const range = (max-min) || Math.abs(max) || 1;
+  const last = finite[finite.length-1];
+  const endIsPeak = last >= max - range*0.05;       // 最後一點接近最大值＝末端急拉
+  return {
+    suggestedMax: max + range*(endIsPeak ? 0.18 : 0.10),
+    suggestedMin: min - range*0.08
+  };
+}
+
 function chartXAxisTicks(color,fontSize){
   const mobile = window.matchMedia("(max-width:640px)").matches;
   return {
@@ -1881,7 +1903,7 @@ function renderPortfolioChart(){
       },
       scales:{
         x:{ticks:chartXAxisTicks(txtCol,fontSize),grid:{color:gridCol}},
-        y:{position:"right", grace:"8%", ticks:{color:txtCol, font:{size:fontSize},
+        y:{position:"right", ...chartYHeadroom(datasets.flatMap(d=>d.data)), ticks:{color:txtCol, font:{size:fontSize},
             callback:v=> usePct ? v.toFixed(1)+"%" : "NT$"+(Math.abs(v)>=10000? (v/10000).toFixed(1)+"萬" : Math.round(v))},
            grid:{color:gridCol}}
       }
@@ -1959,7 +1981,7 @@ function renderChart(){
       },
       scales:{
         x:{ticks:chartXAxisTicks(txtCol,fontSize),grid:{color:gridCol}},
-        y:{position:"right", grace:"8%", ticks:{color:txtCol, font:{size:fontSize},
+        y:{position:"right", ...chartYHeadroom(vals), ticks:{color:txtCol, font:{size:fontSize},
             callback:v=> usePct ? v.toFixed(1)+"%" : fmtN(v, v>=100?0:2)},
            grid:{color:gridCol}}
       }
@@ -2811,7 +2833,6 @@ $("#btnAdd").onclick = openAdd;
 $("#btnAddStock").onclick = openStock;
 $("#btnRefresh").onclick = ()=>updateAll({fresh:true});
 $("#btnMarketRefresh").onclick = ()=>loadMarketQuotes(true);
-$("#btnCompare").onclick = ()=>enterCompareView();
 $("#btnExport").onclick = doExport;
 $("#btnImport").onclick = ()=>$("#importFile").click();
 $("#importFile").onchange = e=>{ if(e.target.files[0]) doImport(e.target.files[0]); e.target.value=""; };

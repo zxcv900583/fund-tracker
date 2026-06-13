@@ -366,7 +366,7 @@ async function run() {
   assert.deepEqual(latestQuoteReconciliation.latestPoint,{date:"2026-06-12",nav:42.8});
   console.log("[e2e] latest fund quote reconciliation passed");
 
-  await cdp.evaluate(`document.querySelector("#btnCompare").click()`);
+  await cdp.evaluate(`document.querySelector("#btnCompareView").click()`);
   await waitForPage(cdp, `chartView==="compare" && chart?.data?.datasets?.length===3`, 45000);
   const comparison = await cdp.evaluate(`({
     panelVisible:!document.querySelector("#comparePanel").hidden,
@@ -650,7 +650,7 @@ async function run() {
   assert.ok(mobile.mainChartFontSize >= 13);
 
   // 手機版比較檢視：開啟後重疊折線畫在主畫布、內嵌面板顯示、字級足夠大
-  await cdp.evaluate(`document.querySelector("#btnCompare").click()`);
+  await cdp.evaluate(`document.querySelector("#btnCompareView").click()`);
   await waitForPage(cdp, `chartView==="compare" && chart?.data?.datasets?.length>=3`, 30000);
   const compareMobile = await cdp.evaluate(`({
     panelVisible:!document.querySelector("#comparePanel").hidden,
