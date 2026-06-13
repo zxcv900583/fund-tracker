@@ -1,8 +1,50 @@
 # 基金追蹤分析軟體 — 產品規格書
 
-**版本：** v1.5<br>
-**日期：** 2026-06-12（v1.1：2026-06-11；v1.0：2026-06-10）<br>
+**版本：** v1.8（前端）／Worker v7<br>
+**日期：** 2026-06-13（v1.1：2026-06-11；v1.0：2026-06-10）<br>
 **作者：** Chan
+
+---
+
+## v1.8 更新摘要（2026-06-13）
+
+- 修正「新增股票時搜尋顯示的價格」與「更新庫存後的目前價格」不一致：搜尋走 `/api/yahoo/quotes`（含 TWSE 個股備援、回即時成交價），更新原本只走 `/api/yahoo/chart`（無個股備援、且用日線 adjclose 還原值取最後一根）。
+- 股票更新改為「歷史走勢（chart）＋ 最新報價（quotes）」並行，以即時成交價覆蓋為最新一筆，使庫存目前價格與搜尋一致，且 Yahoo chart 缺資料時仍有 TWSE 備援；最新點日期沿用 chart 的 UTC 慣例避免日期 key 重複。
+- 已對證交所官方 OpenAPI 交叉驗證：^TWII / 2330 / 0050 的 API 回傳值與週五官方收盤分毫不差。
+
+## v1.7 更新摘要（2026-06-13）
+
+- 修正基富通／CSV 重複匯入會「重複加倉、部位翻倍」：比對既有持倉改以 **SecId / ISIN 為主鍵**（持倉以 Morningstar 正式名稱儲存，基富通報表名稱常含【好好退休】【TISA級別】等前綴而與其不符，原本只用名稱比對會把同一檔誤判為新基金）。
+- 基富通投資總覽彙總匯入改為「**覆蓋既有彙總、保留手動買入/配息**」的冪等更新：彙總記錄標記 `origin:"fundrich"`，重匯時先移除舊彙總再寫入新值，每月重匯報表即正確更新而非疊加；標記隨 JSON 匯出/入保留。
+
+## v1.6 更新摘要（2026-06-13）— 安全強化
+
+**前端：**
+
+- 匯入 JSON 備份完整消毒：重新生成所有 ID、`type` 列舉白名單（RSP/LUMP）、currency/ISIN 以原值驗證、金額與日期數值驗證、`settings` 僅複製白名單欄位（防原型污染與 XSS 注入）。
+- 所有動態產生的 HTML（持倉列、買入/配息/排程列的 id 與 type）全面以 `esc()` 跳脫。
+- Chart.js CDN 加上 SRI（Subresource Integrity）完整性驗證。
+- `addDays` 改用本地時間組字串，修正 UTC+8 時區少一天問題。
+- Service Worker 改為只快取同源靜態資源與 CDN（排除 API 與帶 `fresh` 的一次性 URL），避免 Cache Storage 無限膨脹、離線誤供舊 API 資料。
+- 開啟自動更新改依「上一個營業日」判斷淨值是否落後，避免週末或當日尚未公布時每小時空抓。
+
+**Cloudflare Worker（升級至 version 7）：** 見下方〈Worker 安全設計〉。
+
+---
+
+## Worker 安全設計（v7）
+
+> 原始碼為乾淨 ES module（非 esbuild 打包產物），可直接 `wrangler dev` / `wrangler deploy`；部署位置 `https://fund-tracker-proxy.fund-tracker-proxy.workers.dev`。
+
+| 機制 | 說明 |
+|------|------|
+| Origin 白名單 | 瀏覽器跨站請求僅允許正式站 `https://zxcv900583.github.io` 與本機開發來源；無 `Origin`（curl／`file://`）放行，其餘回 **403**。綁網站網域而非使用者，故任何訪客從本站操作皆放行，僅阻擋他站盜用為免費 API。 |
+| 速率限制 | 每 IP 一般 API 120 次/分、`deep health` 5 次/分（isolate 記憶體版，擋單點濫用；全域防護建議另加 Cloudflare WAF rate-limiting 規則）。 |
+| deep health 金鑰 | 設定 `HEALTH_KEY`（`wrangler secret put`）後，`/health?deep=1` 需帶 `&key=` 才可觸發 7 項上游探測。 |
+| KV 寫入節流 | `putCache` 以內容簽章比對，資料未變動即略過寫入，節省 KV 免費額度（1,000 寫/日）。 |
+| TWSE 具名欄位 | 加權指數改以欄位名（`收盤指數`/`漲跌`/`漲跌點數`/`日期`）存取，避免 TWSE 改版面即失效。 |
+| chart `fresh` | `/api/yahoo/chart?fresh=1` 強制清快取（回 `no-store`），供「強制更新」真正取得最新資料。 |
+| 報價對帳 | `normalizeQuote` 盤中以 meta 即時報價、收盤後退回 K 線陣列；前收一律用 `previousClose` 或 K 線前一日，不使用 `chartPreviousClose`（除權息調整會使當日漲跌計算失真）。 |
 
 ---
 
