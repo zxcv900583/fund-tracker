@@ -192,10 +192,11 @@ function seedScript() {
       }
     ];
     const makeHistory = (base, weeklyGain, phase) => {
+      // 相對日期：歷史鋪到 14 天前為止，確保任何一天執行時 API 都有更新資料可抓
       const rows = [];
-      const start = new Date("2025-05-01T00:00:00Z");
+      const end = new Date(Date.now() - 14*86400000);
       for (let i=0;i<59;i++) {
-        const date = new Date(start.getTime()+i*7*86400000);
+        const date = new Date(end.getTime()-(58-i)*7*86400000);
         rows.push({
           date:date.toISOString().slice(0,10),
           nav:+(base*(1+i*weeklyGain+Math.sin(i/4+phase)*0.012)).toFixed(4)
@@ -289,8 +290,12 @@ async function run() {
   assert.equal(initial.workerBase, localWorker);
 
   const refreshResults = await cdp.evaluate(`updateAll({fresh:true})`);
+  const seedEnd = new Date(Date.now() - 14*86400000).toISOString().slice(0,10);
+  const today = new Date().toISOString().slice(0,10);
   assert.equal(refreshResults.length,2);
-  assert.equal(refreshResults[0].latestDate,"2026-06-12");
+  assert.match(refreshResults[0].latestDate, /^\d{4}-\d{2}-\d{2}$/);
+  assert.ok(refreshResults[0].latestDate > seedEnd, `latestDate ${refreshResults[0].latestDate} 應晚於 fixture 結尾 ${seedEnd}`);
+  assert.ok(refreshResults[0].latestDate <= today);
   assert.equal(refreshResults[0].changed,true);
   const refreshFeedback = await cdp.evaluate(`({
     status:document.querySelector("#updStatus").textContent,
@@ -298,11 +303,11 @@ async function run() {
     live:document.querySelector("#toast").getAttribute("aria-live"),
     latestDate:JSON.parse(localStorage.getItem("fund_tracker_nav_cache_F0HKG05X2C")).navHistory.at(-1).date
   })`);
-  assert.match(refreshFeedback.status,/基金淨值 06\/12/);
+  assert.match(refreshFeedback.status,/基金淨值 \d{2}\/\d{2}/);
   assert.match(refreshFeedback.status,/查詢/);
   assert.match(refreshFeedback.toast,/取得新資料|目前沒有新資料/);
   assert.equal(refreshFeedback.live,"polite");
-  assert.equal(refreshFeedback.latestDate,"2026-06-12");
+  assert.equal(refreshFeedback.latestDate,refreshResults[0].latestDate);
   cdp.events.length = 0;
   console.log("[e2e] NAV refresh date and completion feedback passed");
 

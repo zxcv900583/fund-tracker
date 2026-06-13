@@ -1,6 +1,8 @@
 # 本機開發與個人檔案（不上傳）
 .claude/
+.codex-remote-attachments/
 .wrangler/
+node_modules/
 cors_test.html
 螢幕擷取畫面*.png
 *.csv

@@ -85,7 +85,7 @@ async function run() {
   const health = await request("/health?deep=1");
   assert.equal(health.response.status, 200);
   assert.equal(health.body.status, "ok");
-  assert.equal(health.body.version, 6);
+  assert.equal(health.body.version, 7);
   assert.equal(health.body.cloudflareProxy, true);
   assert.equal(health.body.kvConfigured, true);
   assert.ok(health.body.checks.length >= 7);
@@ -159,6 +159,26 @@ async function run() {
   const options = await request("/api/yahoo/quotes", { method: "OPTIONS" });
   assert.equal(options.response.status, 204);
   assert.equal(options.response.headers.get("access-control-allow-origin"), "*");
+
+  // Origin 白名單：站台與本機放行，其他網站 403
+  const blockedOrigin = await request("/api/yahoo/quotes?symbols=AAPL", {
+    headers: { Origin: "https://evil.example.com" },
+  });
+  assert.equal(blockedOrigin.response.status, 403);
+  const allowedOrigin = await request("/api/yahoo/quotes?symbols=AAPL", {
+    headers: { Origin: "https://zxcv900583.github.io" },
+  });
+  assert.equal(allowedOrigin.response.status, 200);
+  const localOrigin = await request("/health", {
+    headers: { Origin: "http://127.0.0.1:8765" },
+  });
+  assert.equal(localOrigin.response.status, 200);
+
+  // chart fresh=1 → 不快取
+  const freshChart = await request("/api/yahoo/chart?symbol=AAPL&range=5d&interval=1d&fresh=1");
+  assert.equal(freshChart.response.status, 200);
+  assert.equal(freshChart.response.headers.get("cache-control"), "no-store");
+  assert.ok(parseChartPoints(freshChart.body).length >= 2);
 
   const invalidCases = [
     ["/api/assets/search?q=", 400],
