@@ -482,7 +482,19 @@ async function run() {
   assert.match(stockHolding.rowText, /股票/);
   assert.match(stockHolding.rowText, /2330\.TW/);
   assert.ok(stockHolding.chartPoints > 20);
-  console.log("[e2e] stock holding and chart passed");
+
+  // 庫存最新價格須與「搜尋同源」的報價端點一致（修正：更新改用 /api/yahoo/quotes 取最新成交價）
+  const stockLatestParity = await cdp.evaluate(`(async()=>{
+    const payload = await (await fetch(MARKET_API+"/api/yahoo/quotes?symbols=2330.TW")).json();
+    const quote = (payload.quotes||[]).find(q=>q.symbol==="2330.TW");
+    const cache = JSON.parse(localStorage.getItem("fund_tracker_nav_cache_2330.TW"));
+    const latest = cache.navHistory.at(-1);
+    return {quotePrice:quote?.price, holdingLatest:latest?.nav, holdingDate:latest?.date};
+  })()`);
+  assert.ok(Number.isFinite(stockLatestParity.quotePrice) && stockLatestParity.quotePrice > 0);
+  assert.equal(stockLatestParity.holdingLatest, stockLatestParity.quotePrice,
+    `庫存最新價 ${stockLatestParity.holdingLatest} 應等於報價端點 ${stockLatestParity.quotePrice}`);
+  console.log("[e2e] stock holding and chart passed; latest-price parity:", JSON.stringify(stockLatestParity));
 
   const shortRangePoints = {};
   for (const [range, expectedPoints] of [["1D",2],["2D",3],["5D",6],["21D",22]]) {

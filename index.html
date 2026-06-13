@@ -512,6 +512,9 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
    v1.7 修正基富通/CSV 重複匯入會重複加倉：比對既有持倉改以 SecId/ISIN 為主鍵
         （持倉以 Morningstar 正式名稱儲存，報表名稱常不符），基富通彙總
         改為「覆蓋既有彙總、保留手動記錄」的冪等更新；origin 標記隨匯出入保留
+   v1.8 修正股票更新與搜尋價格不一致：股票更新除歷史走勢外，另以與搜尋同源的
+        /api/yahoo/quotes（含 TWSE 個股備援）取最新成交價覆蓋為最新一筆，
+        庫存目前價格與搜尋顯示一致，且 Yahoo chart 缺資料時仍有備援
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
@@ -756,6 +759,19 @@ async function stockHistory(symbol, range="10y", fresh=false){
   const history = parseMarketHistory(payload).map(point=>({date:point.date,nav:point.value}));
   if(history.length<2) throw new Error("股票歷史資料不足");
   return {history,source:payload._meta?.source||"unknown"};
+}
+
+// 股票最新報價：與「搜尋」同源（/api/yahoo/quotes，worker 內含台股 TWSE 個股備援），
+// 取得當下成交價作為最新一筆，確保庫存目前價格與搜尋顯示一致（歷史走勢仍由 chart 提供）
+async function stockQuoteLatest(symbol){
+  const payload = await marketFetch(`/api/yahoo/quotes?symbols=${encodeURIComponent(symbol)}`, 20000);
+  const q = (payload.quotes||[]).find(x=>x.symbol===symbol && Number.isFinite(x.price) && x.price>0);
+  if(!q) return null;
+  // 日期沿用 chart 的 UTC 慣例（parseMarketHistory 也用 toISOString），確保最新點與歷史同日期 key
+  const date = Number.isFinite(q.marketTime)
+    ? new Date(q.marketTime*1000).toISOString().slice(0,10)
+    : todayStr();
+  return {date, nav:q.price, source:q.source||"yahoo"};
 }
 
 // TDCC 備援（境外基金最新淨值, 以 ISIN 比對）
@@ -1327,13 +1343,31 @@ async function updateFund(h, options={}){
   let ok = false;
   let meta = {};
   if(h.assetType==="stock"){
-    try{
-      const result = await stockHistory(h.symbol||h.fundCode,"10y",opts.fresh===true);
+    const symbol = h.symbol||h.fundCode;
+    // 歷史走勢（chart）＋ 最新報價（quotes，與搜尋同源、含 TWSE 個股備援）並行
+    const [historySettled,quoteSettled] = await Promise.allSettled([
+      stockHistory(symbol,"10y",opts.fresh===true),
+      stockQuoteLatest(symbol)
+    ]);
+    let historyLatestDate = null;
+    if(historySettled.status==="fulfilled"){
+      const result = historySettled.value;
       mergeHistory(h,result.history,result.source);
-      meta = {source:result.source,fetchedAt:new Date().toISOString()};
+      historyLatestDate = result.history.at(-1)?.date||null;
+      meta = {source:result.source,fetchedAt:new Date().toISOString(),historyLatestDate};
       ok = true;
-    }catch(error){
-      console.error(`股票歷史更新失敗：${h.fundName}`,error);
+    }else{
+      console.error(`股票歷史更新失敗：${h.fundName}`,historySettled.reason);
+    }
+    if(quoteSettled.status==="fulfilled" && quoteSettled.value){
+      const q = quoteSettled.value;
+      const latestSupplemented = !historyLatestDate || q.date>=historyLatestDate;
+      // 即時成交價覆蓋為最新一筆，確保庫存目前價格與搜尋一致（chart 的 adjclose 易落後或被還原）
+      mergeHistory(h,[{date:q.date,nav:q.nav}],q.source);
+      meta = {source:q.source,fetchedAt:new Date().toISOString(),latestSupplemented,historyLatestDate};
+      ok = true;
+    }else if(quoteSettled.status==="rejected"){
+      console.error(`股票最新報價更新失敗：${h.fundName}`,quoteSettled.reason);
     }
     if(h.currency!=="TWD") await ensureFx(h);
     return updateResult(h,before,ok,meta);
