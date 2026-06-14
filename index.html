@@ -583,6 +583,11 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
          ②單一資產圖以圓形徽章標出 B（買入，定期定額橘／單筆藍）與 S（賣出，紅），
          含淡化垂直虛線；點擊徽章開啟交易明細彈窗(#dlgTxn)，列出該日買入(含定期定額)
          與賣出明細 ③組合圖亦彙整標示買賣點（不可點）
+   v1.15 買入表單自動帶入當日數值：管理彈窗「新增買入記錄」選好日期即自動帶入
+         該日數值（基金=當日淨值、股票=當日收盤價，皆可手動覆寫），開啟表單亦
+         依預設日期(今天)先用快取靜默預填。優先用本地快取(瞬間、免連網)，基金
+         查無快取才自動連 Morningstar API 補；股票無快取則提示先「更新」抓歷史。
+         新增 navOnOrBefore(取該日或之前最近交易日) 與 autoFillNavForDate()。
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
@@ -1648,6 +1653,14 @@ function findNavInList(list, dateStr, maxDays=7){
   const limit = addDays(dateStr, maxDays);
   return (list||[]).find(x=>x.date>=dateStr && x.date<=limit) || null;
 }
+// 取「該日或之前最近交易日」的數值（買入價以當日為準）；查無則退而取之後最近一筆
+function navOnOrBefore(list, dateStr, maxBack=10){
+  if(!Array.isArray(list) || !list.length) return null;
+  const min = addDays(dateStr, -maxBack);
+  let best = null;
+  for(const x of list){ if(x.date<=dateStr && x.date>=min && (!best || x.date>best.date)) best = x; }
+  return best || findNavInList(list, dateStr, maxBack);
+}
 function latest(h){ const c=getCache(h); return c.navHistory.length ? c.navHistory[c.navHistory.length-1] : null; }
 function prev(h){ const c=getCache(h); return c.navHistory.length>1 ? c.navHistory[c.navHistory.length-2] : null; }
 function fxOf(h){ return h.currency==="TWD" ? 1 : ((fxCache[h.currency]&&fxCache[h.currency].rate)||1); }
@@ -2220,6 +2233,23 @@ async function navLookup(secId, currency, dateStr, inputEl, btn){
   }catch(e){ toast("查詢失敗："+e.message); }
   btn.disabled=false; btn.textContent=old;
 }
+// 選好日期 → 自動帶入當日數值：優先用本地快取（瞬間），基金沒快取到才連 API 補
+async function autoFillNavForDate({silent=false, cacheOnly=false}={}){
+  const h = holdings.find(x=>x.id===mngHoldingId); if(!h) return;
+  const dateStr = $("#eDate").value; if(!dateStr) return;
+  const navInput = $("#eNav");
+  const hit = navOnOrBefore(getCache(h).navHistory, dateStr, 10);
+  if(hit){
+    navInput.value = hit.nav;
+    if(h.assetType==="stock") syncStockEditAmount();
+    else if(parseFloat($("#eAmt").value)>0) syncUnits($("#eAmt"), navInput, $("#eUnits"));
+    if(!silent) toast(h.assetType==="stock" ? `已帶入 ${hit.date} 收盤價（可修改）` : `已帶入 ${hit.date} 淨值`);
+    return;
+  }
+  if(cacheOnly) return;                 // 開啟表單時只用快取預填，不主動連網
+  if(h.assetType!=="stock") navLookup(h.fundCode, h.currency, dateStr, navInput, $("#btnENavLookup"));
+  else if(!silent) toast("快取無該日股價，請先點『⟳ 更新』抓取歷史或手動輸入");
+}
 async function confirmAdd(){
   if(!picked) return;
   const nav = parseFloat($("#pNav").value);
@@ -2444,6 +2474,7 @@ function openPurEdit(pid){
   $("#eNote").value = p?(p.note||""):"";
   $("#purEdit").hidden = false;
   if(isStock) syncStockEditAmount();
+  if(!p) autoFillNavForDate({silent:true, cacheOnly:true});   // 新增時依預設日期（今天）先用快取預填
   (isStock?$("#eUnits"):$("#eAmt")).focus();
 }
 function syncStockEditAmount(){
@@ -3216,6 +3247,8 @@ $("#eNav").addEventListener("input", ()=>{
   if(h?.assetType==="stock") syncStockEditAmount();
   else if(parseFloat($("#eAmt").value)>0) syncUnits($("#eAmt"), $("#eNav"), $("#eUnits"));
 });
+/* 選好買入日期 → 自動帶入當日淨值/收盤價（可手動覆寫） */
+$("#eDate").addEventListener("change", ()=>autoFillNavForDate());
 
 /* 配息記錄 */
 function openDivEdit(did){

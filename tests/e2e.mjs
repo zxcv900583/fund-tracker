@@ -563,6 +563,23 @@ async function run() {
   assert.equal(stockManagement.priceLabel, "每股成交價");
   assert.equal(stockManagement.scheduleHidden, true);
   assert.equal(stockManagement.dividendVisible, true);
+
+  // 自動帶入：開啟新增買入即依預設日期預填，改日期則帶入該日快取股價（可手動覆寫）
+  const autoFill = await cdp.evaluate(`(async()=>{
+    document.querySelector("#btnAddPur").click();              // openPurEdit(null)：開啟即靜默預填
+    await new Promise(r=>setTimeout(r,150));
+    const prefill = document.querySelector("#eNav").value;
+    const hist = JSON.parse(localStorage.getItem("fund_tracker_nav_cache_2330.TW")).navHistory;
+    const pick = hist[Math.floor(hist.length*0.5)];           // 取快取中段一筆確定存在
+    const el = document.querySelector("#eDate");
+    el.value = pick.date; el.dispatchEvent(new Event("change",{bubbles:true}));
+    await new Promise(r=>setTimeout(r,150));
+    return {prefill, pickNav:pick.nav, filled:document.querySelector("#eNav").value};
+  })()`);
+  assert.ok(parseFloat(autoFill.prefill) > 0, "開啟新增買入應依預設日期自動預填股價");
+  assert.equal(parseFloat(autoFill.filled), autoFill.pickNav, "選好日期應自動帶入該日快取股價");
+  console.log("[e2e] purchase price auto-fill passed:", JSON.stringify(autoFill));
+
   await cdp.evaluate(`document.querySelector("#dlgMng").close()`);
   console.log("[e2e] stock management passed");
 
