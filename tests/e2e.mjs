@@ -566,6 +566,40 @@ async function run() {
   await cdp.evaluate(`document.querySelector("#dlgMng").close()`);
   console.log("[e2e] stock management passed");
 
+  // 買賣標記：圖上標 B/S、點 S 看明細、賣出不影響持股（輕量版約束）
+  await cdp.evaluate(`[...document.querySelectorAll("#tbody tr[data-id]")].find(tr=>tr.textContent.includes("2330.TW")).click()`);
+  await waitForPage(cdp, `chartView==="fund" && chart?.data?.datasets?.length===1 && (chart.options.plugins?.markers?.meta?.labels||[]).length>20`, 30000);
+  const markerTest = await cdp.evaluate(`(async()=>{
+    const labels = chart.options.plugins.markers.meta.labels;
+    const buyLabel = labels[Math.floor(labels.length*0.2)];
+    const sellLabel = labels[Math.floor(labels.length*0.8)];
+    const h = holdings.find(item=>item.symbol==="2330.TW");
+    const unitsBefore = totUnits(h);
+    h.purchases[0].date = buyLabel;                 // 對齊既有買入到可見 label（不改股數）
+    h.sells = [{sellId:"s_e2e", date:sellLabel, units:5, price:100, fee:0, note:"e2e賣出"}];
+    renderAll();
+    await new Promise(r=>setTimeout(r,300));
+    const markerDates = (chart.$markers||[]).map(m=>m.date);
+    const sm = (chart.$markers||[]).find(m=>m.date===sellLabel);
+    let detail = null;
+    if(sm){
+      handleMarkerClick({x:sm.x,y:0}, chart, h.id);
+      await new Promise(r=>setTimeout(r,150));
+      const dlg=document.querySelector("#dlgTxn");
+      detail={open:dlg.open, tags:[...dlg.querySelectorAll(".txn-tag")].map(t=>t.textContent.trim()), hasSell:document.querySelector("#txnDetailBody").textContent.includes("賣出")};
+      dlg.close();
+    }
+    return {buyLabel, sellLabel, markerDates, unitsBefore, unitsAfter:totUnits(h), sellsCount:h.sells.length, detail};
+  })()`);
+  assert.ok(markerTest.markerDates.includes(markerTest.buyLabel), "圖上應有買入(B)標記：" + JSON.stringify(markerTest.markerDates));
+  assert.ok(markerTest.markerDates.includes(markerTest.sellLabel), "圖上應有賣出(S)標記");
+  assert.equal(markerTest.unitsAfter, markerTest.unitsBefore, "賣出不得改變持股數（輕量版：不拆已實現）");
+  assert.equal(markerTest.sellsCount, 1);
+  assert.ok(markerTest.detail && markerTest.detail.open, "點擊 S 標記應開啟交易明細彈窗");
+  assert.deepEqual(markerTest.detail.tags, ["S"]);
+  assert.ok(markerTest.detail.hasSell, "明細應含賣出資訊");
+  console.log("[e2e] buy/sell markers + detail passed:", JSON.stringify({markers:markerTest.markerDates, units:markerTest.unitsAfter}));
+
   await cdp.evaluate(`(() => {
     const h=JSON.parse(localStorage.getItem("fund_tracker_holdings")).find(item=>item.symbol==="2330.TW");
     document.querySelector('button[data-act="cmp"][data-id="'+h.id+'"]').click();

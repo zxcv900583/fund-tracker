@@ -106,12 +106,16 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
 .sr-item .px{font-variant-numeric:tabular-nums;font-size:13px;text-align:right;flex:none}
 .navRow{display:flex;gap:6px}
 .navRow input{flex:1}
-#purTable,#divTable{width:100%;border-collapse:collapse;font-size:13px}
-#purTable th,#divTable th{font-size:11px;color:var(--muted);text-align:right;padding:4px 6px;border-bottom:1px solid var(--border)}
-#purTable th:first-child,#divTable th:first-child{text-align:left}
-#purTable td,#divTable td{padding:5px 6px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums}
-#purTable td:first-child,#divTable td:first-child{text-align:left}
-#purTable .act button,#divTable .act button{border:none;background:none;font-size:14px;cursor:pointer;padding:1px 4px}
+#purTable,#divTable,#sellTable{width:100%;border-collapse:collapse;font-size:13px}
+#purTable th,#divTable th,#sellTable th{font-size:11px;color:var(--muted);text-align:right;padding:4px 6px;border-bottom:1px solid var(--border)}
+#purTable th:first-child,#divTable th:first-child,#sellTable th:first-child{text-align:left}
+#purTable td,#divTable td,#sellTable td{padding:5px 6px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums}
+#purTable td:first-child,#divTable td:first-child,#sellTable td:first-child{text-align:left}
+#purTable .act button,#divTable .act button,#sellTable .act button{border:none;background:none;font-size:14px;cursor:pointer;padding:1px 4px}
+.txn-item{border:1px solid var(--border);border-radius:8px;padding:9px 11px;margin-bottom:8px;font-size:14px;line-height:1.55;border-left-width:4px}
+.txn-item.buy{border-left-color:var(--lump)} .txn-item.sell{border-left-color:var(--down)}
+.txn-tag{display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;border-radius:50%;color:#fff;font-weight:700;font-size:12px;vertical-align:middle}
+.txn-tag.B{background:var(--lump)} .txn-tag.S{background:var(--down)}
 .secHead{font-weight:700;margin-bottom:6px}
 .planRow{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);border-radius:6px;padding:6px 9px;margin-bottom:6px;font-size:13px;gap:8px;flex-wrap:wrap}
 .planRow .off{opacity:.55}
@@ -422,6 +426,31 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
       <div class="note">配息選「再投入」者：記一筆配息＋一筆同金額的買入記錄，報酬即計算正確。</div>
     </div>
 
+    <div style="border-top:2px solid var(--border);margin-top:14px;padding-top:10px">
+      <div class="secHead">🔻 賣出記錄 <span class="subTxt" id="sellSum"></span></div>
+      <table id="sellTable">
+        <thead><tr><th>賣出日</th><th>股數/單位</th><th>賣出價</th><th>備註</th><th></th></tr></thead>
+        <tbody id="sellBody"></tbody>
+      </table>
+      <div style="margin-top:8px;text-align:right"><button class="btn" id="btnAddSell">＋ 新增賣出</button></div>
+      <div id="sellEdit" hidden style="border-top:1px solid var(--border);margin-top:10px;padding-top:10px">
+        <div class="row2">
+          <div class="field"><label>賣出日</label><input type="date" id="eSellDate"></div>
+          <div class="field"><label id="eSellUnitsLabel">賣出股數/單位</label><input type="number" id="eSellUnits" min="0" step="any"></div>
+        </div>
+        <div class="row2">
+          <div class="field"><label id="eSellPriceLabel">賣出價（計價幣別）</label><input type="number" id="eSellPrice" min="0" step="any"></div>
+          <div class="field"><label>手續費（選填）</label><input type="number" id="eSellFee" min="0" step="any" placeholder="0"></div>
+        </div>
+        <div class="field"><label>備註</label><input type="text" id="eSellNote" placeholder="選填"></div>
+        <div style="text-align:right;display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn" id="btnSellCancel">取消</button>
+          <button class="btn primary" id="btnSellSave">儲存</button>
+        </div>
+      </div>
+      <div class="note">賣出僅作記錄並在走勢圖標示「S」、可點開看明細；目前<b>不影響持有股數與損益計算</b>（未拆已實現損益）。</div>
+    </div>
+
     <div id="rspSection" style="border-top:2px solid var(--border);margin-top:14px;padding-top:10px">
       <div class="secHead">🔁 定期定額排程</div>
       <div id="rspList"></div>
@@ -467,6 +496,13 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
     <button class="btn" data-close="dlgCompare">取消</button>
     <button class="btn primary" id="btnCompareConfirm">確定</button>
   </div>
+</dialog>
+
+<!-- ===== 交易明細 Dialog（點圖上 B/S 標記） ===== -->
+<dialog id="dlgTxn">
+  <div class="dlgHead"><span id="txnDetailTitle">交易明細</span><button class="xBtn" data-close="dlgTxn">✕</button></div>
+  <div class="dlgBody" id="txnDetailBody"></div>
+  <div class="dlgFoot"><button class="btn primary" data-close="dlgTxn">關閉</button></div>
 </dialog>
 
 <!-- ===== CSV 匯入 Dialog ===== -->
@@ -542,6 +578,11 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
          8000，實測統一奔騰回 1998 至今 27.8 年）③手機圖表重新設計：單一資產圖
          漸層面積填色、移除直向格線與軸框、日期短化(6/12)、線加粗端點白邊；
          比較圖圖例手機改置底、格線淡化
+   v1.14 走勢圖買賣標記（輕量版）：①持倉新增「賣出記錄」(holding.sells)，管理彈窗
+         可新增/編輯/刪除，僅作記錄與圖上標示，不影響持有股數與損益會計（不拆已實現）
+         ②單一資產圖以圓形徽章標出 B（買入，定期定額橘／單筆藍）與 S（賣出，紅），
+         含淡化垂直虛線；點擊徽章開啟交易明細彈窗(#dlgTxn)，列出該日買入(含定期定額)
+         與賣出明細 ③組合圖亦彙整標示買賣點（不可點）
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
@@ -615,6 +656,7 @@ function normalizeHoldings(){
     h.purchases = h.purchases||[];
     h.dividends = h.dividends||[];
     h.rspPlans  = h.rspPlans||[];
+    h.sells     = h.sells||[];   // 賣出記錄（僅標示與明細，不影響持股/損益計算）
   });
 }
 normalizeHoldings();
@@ -641,7 +683,7 @@ let marketLoading = false;
 let apiDiagnostics = {fundSearch:null,fundHistory:null,tdcc:null,market:null};
 let picked = null;                 // 搜尋選中的基金
 let pickedStock = null;
-let mngHoldingId = null, editPurId = null, editDivId = null;
+let mngHoldingId = null, editPurId = null, editDivId = null, editSellId = null;
 let chartView = "fund";            // fund | portfolio | compare
 let quoteSessions = {};            // symbol → {start,end} 交易時段（供持倉列顯示各市場狀態）
 
@@ -1860,35 +1902,73 @@ const markerPlugin = {
   id:"markers",
   afterDatasetsDraw(ch, args, opts){
     const {ctx, chartArea:{top,bottom,left,right}, scales:{x,y}} = ch;
-    const meta = opts.meta; if(!meta) return;
+    const meta = opts.meta;
+    ch.$markers = [];                 // 供點擊命中：[{x,date}]
+    if(!meta) return;
+    const css = v=>getComputedStyle(document.body).getPropertyValue(v).trim();
     ctx.save();
     // 持倉均價水平線
     if(meta.costLine!=null && meta.costLine>=y.min && meta.costLine<=y.max){
       const yy = y.getPixelForValue(meta.costLine);
-      ctx.strokeStyle = getComputedStyle(document.body).getPropertyValue("--muted").trim();
+      ctx.strokeStyle = css("--muted");
       ctx.setLineDash([6,4]); ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(left,yy); ctx.lineTo(right,yy); ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = ctx.strokeStyle; ctx.font = `${chartFontSize()}px sans-serif`; ctx.textAlign="left";
       ctx.fillText(meta.costLabel, left+4, yy-4);
     }
-    // 買入標記
-    (meta.buys||[]).forEach(b=>{
-      const idx = meta.labels.indexOf(b.date);
+    // 買/賣徽章：B（買，依 RSP/LUMP 配色）、S（賣，紅）
+    const drawBadge = (date, letter, col)=>{
+      const idx = meta.labels.indexOf(date);
       if(idx<0) return;
       const xx = x.getPixelForValue(idx);
-      const col = b.type==="RSP" ? getComputedStyle(document.body).getPropertyValue("--rsp").trim()
-                                 : getComputedStyle(document.body).getPropertyValue("--lump").trim();
-      ctx.strokeStyle = col; ctx.setLineDash([3,3]); ctx.lineWidth = 1;
+      if(xx<left-2 || xx>right+2) return;
+      ctx.strokeStyle = col; ctx.globalAlpha = 0.3; ctx.setLineDash([3,3]); ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(xx,top); ctx.lineTo(xx,bottom); ctx.stroke();
-      ctx.setLineDash([]);
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+      const r = 7, cy = bottom - r - 1;
       ctx.fillStyle = col;
-      ctx.beginPath(); ctx.moveTo(xx,bottom-1); ctx.lineTo(xx-5,bottom+7); ctx.lineTo(xx+5,bottom+7); ctx.closePath(); ctx.fill();
-    });
+      ctx.beginPath(); ctx.arc(xx, cy, r, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.font = `bold 10px sans-serif`; ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.fillText(letter, xx, cy+0.5);
+      ch.$markers.push({x:xx, date});
+    };
+    (meta.buys||[]).forEach(b=> drawBadge(b.date, "B", b.type==="RSP"?css("--rsp"):css("--lump")) );
+    (meta.sells||[]).forEach(s=> drawBadge(s.date, "S", css("--down")) );
     ctx.restore();
   }
 };
 if(window.Chart) Chart.register(markerPlugin);
+
+// 點擊圖表 → 找最近的買/賣徽章 → 開該日交易明細
+function handleMarkerClick(evt, ch, holdingId){
+  const markers = ch.$markers||[];
+  if(!markers.length || !holdingId) return;
+  let best=null, bestDx=14;
+  markers.forEach(m=>{ const dx=Math.abs(m.x-evt.x); if(dx<bestDx){ bestDx=dx; best=m; } });
+  if(best) openTxnDetail(holdingId, best.date);
+}
+function openTxnDetail(holdingId, date){
+  const h = holdings.find(x=>x.id===holdingId); if(!h) return;
+  const unitName = h.assetType==="stock" ? "股" : "單位";
+  const buys = h.purchases.filter(p=>p.date===date);
+  const sells = (h.sells||[]).filter(s=>s.date===date);
+  const rows = [];
+  buys.forEach(p=>{
+    const amt = (p.amount!=null&&p.amount>0)?+p.amount:(+p.units||0)*(+p.navAtPurchase||0);
+    const tname = h.assetType==="stock" ? "股票買入" : (p.type==="RSP"?"定期定額":"單筆買入");
+    rows.push(`<div class="txn-item buy"><span class="txn-tag B">B</span> <b>${esc(tname)}</b><br>
+      ${fmtN(+p.units,4)} ${unitName} × ${fmtN(+p.navAtPurchase, p.navAtPurchase>=100?2:4)}　成本 ${fmtN(amt+(+p.fee||0),0)} ${esc(h.currency)}${+p.fee>0?`（含費 ${fmtN(+p.fee,0)}）`:""}${p.note?`<br><span class="subTxt">${esc(p.note)}</span>`:""}</div>`);
+  });
+  sells.forEach(s=>{
+    rows.push(`<div class="txn-item sell"><span class="txn-tag S">S</span> <b>賣出</b><br>
+      ${fmtN(+s.units,4)} ${unitName} × ${fmtN(+s.price, s.price>=100?2:4)}　價金 ${fmtN((+s.units||0)*(+s.price||0)-(+s.fee||0),0)} ${esc(h.currency)}${+s.fee>0?`（扣費 ${fmtN(+s.fee,0)}）`:""}${s.note?`<br><span class="subTxt">${esc(s.note)}</span>`:""}</div>`);
+  });
+  if(!rows.length) return;
+  $("#txnDetailTitle").textContent = `${h.fundName}　${date}`;
+  $("#txnDetailBody").innerHTML = rows.join("");
+  $("#dlgTxn").showModal();
+}
 
 // 投資組合每日序列：現值 / 累計投入 / 累計配息（TWD，外幣以目前匯率近似）
 function buildPortfolioSeries(start, end){
@@ -1940,11 +2020,14 @@ function renderPortfolioChart(){
   const txtCol  = getComputedStyle(document.body).getPropertyValue("--muted").trim();
   const accCol  = getComputedStyle(document.body).getPropertyValue("--accent").trim();
   const fontSize = chartFontSize();
-  // 全部基金的買入標記
-  const buys = [];
+  // 全部基金的買入/賣出標記
+  const buys = [], sells = [];
   const visibleStart = s.labels[0], visibleEnd = s.labels.at(-1);
-  holdings.forEach(h=>h.purchases.forEach(p=>{ if(p.date>=visibleStart&&p.date<=visibleEnd) buys.push({date:p.date, type:p.type}); }));
-  const meta = {labels:s.labels, buys, costLine: usePct?100:null, costLabel: usePct?"成本 100%":""};
+  holdings.forEach(h=>{
+    h.purchases.forEach(p=>{ if(p.date>=visibleStart&&p.date<=visibleEnd) buys.push({date:p.date, type:p.type}); });
+    (h.sells||[]).forEach(x=>{ if(x.date>=visibleStart&&x.date<=visibleEnd) sells.push({date:x.date}); });
+  });
+  const meta = {labels:s.labels, buys, sells, costLine: usePct?100:null, costLabel: usePct?"成本 100%":""};
   let datasets;
   if(usePct){
     // 含息報酬指數：(現值＋累計配息)/累計投入 ×100
@@ -2016,10 +2099,12 @@ function renderChart(){
   const lineCol = trendColor(data.map(x=>x.nav));
   const visibleStart = data[0].date, visibleEnd = data.at(-1).date;
   const buys = h.purchases.map(p=>({date:p.date, type:p.type})).filter(b=>b.date>=visibleStart&&b.date<=visibleEnd);
+  const sells = (h.sells||[]).map(s=>({date:s.date})).filter(s=>s.date>=visibleStart&&s.date<=visibleEnd);
 
   const meta = {
     labels,
     buys,
+    sells,
     costLine: usePct ? (base?100:null) : base,
     costLabel: usePct
       ? (h.assetType==="stock"?"持股均價 100%":"持倉均價 100%")
@@ -2042,6 +2127,7 @@ function renderChart(){
       responsive:true, maintainAspectRatio:false, animation:false,
       layout:{padding:chartLayoutPadding()},
       interaction:{mode:"index", intersect:false},
+      onClick:(e,els,c)=>handleMarkerClick(e,c,h.id),   // 點 B/S 徽章看交易明細
       plugins:{
         legend:{display:false},
         markers:{meta},
@@ -2276,8 +2362,11 @@ function openMng(id){
   $("#btnENavLookup").hidden = h.assetType==="stock";
   $("#purEdit").hidden = true;
   $("#divEdit").hidden = true;
+  $("#sellEdit").hidden = true;
+  $("#eSellUnitsLabel").textContent = h.assetType==="stock" ? "賣出股數" : "賣出單位數";
+  $("#eSellPriceLabel").textContent = h.assetType==="stock" ? "賣出價" : "賣出淨值";
   $("#rspSection").hidden = h.assetType==="stock";
-  renderPurTable(); renderDivTable(); renderRspList();
+  renderPurTable(); renderDivTable(); renderSellTable(); renderRspList();
   $("#rspStart").value = todayStr();
   $("#dlgMng").showModal();
 }
@@ -2307,6 +2396,17 @@ function renderDivTable(){
     <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis" title="${esc(d.note)}">${esc(d.note||"")}</td>
     <td class="act"><button data-dedit="${esc(d.divId)}" title="編輯">✏️</button><button data-ddel="${esc(d.divId)}" title="刪除">🗑️</button></td>
   </tr>`).join("") : `<tr><td colspan="4" class="subTxt" style="text-align:center">尚無配息記錄</td></tr>`;
+}
+function renderSellTable(){
+  const h = holdings.find(x=>x.id===mngHoldingId); if(!h) return;
+  const sells = h.sells||[];
+  const totSold = sells.reduce((s,x)=>s+(+x.units||0),0);
+  $("#sellSum").textContent = sells.length ? `累計賣出 ${fmtN(totSold,4)} ${h.assetType==="stock"?"股":"單位"}` : "";
+  $("#sellBody").innerHTML = sells.length ? sells.map(s=>`<tr>
+    <td>${esc(s.date)}</td><td>${fmtN(+s.units,4)}</td><td>${fmtN(+s.price, s.price>=100?2:4)}</td>
+    <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis" title="${esc(s.note)}">${esc(s.note||"")}</td>
+    <td class="act"><button data-sedit="${esc(s.sellId)}" title="編輯">✏️</button><button data-sdel="${esc(s.sellId)}" title="刪除">🗑️</button></td>
+  </tr>`).join("") : `<tr><td colspan="5" class="subTxt" style="text-align:center">尚無賣出記錄</td></tr>`;
 }
 function renderRspList(){
   const h = holdings.find(x=>x.id===mngHoldingId); if(!h) return;
@@ -2418,6 +2518,12 @@ function sanitizeImportedHoldings(list){
         if(!(day>=1 && day<=31) || !amount || !IMP_DATE_RE.test(String(pl.startDate||""))) return null;
         return {planId:uid("plan"), dayOfMonth:day, amount, fee:impPosNum(pl.fee)||0, startDate:pl.startDate,
           enabled:pl.enabled!==false, lastApplied:IMP_DATE_RE.test(String(pl.lastApplied||""))?pl.lastApplied:null};
+      }).filter(Boolean),
+      sells: (Array.isArray(h.sells)?h.sells:[]).map(s=>{
+        if(!s || typeof s!=="object") return null;
+        const units = impPosNum(s.units), price = impPosNum(s.price);
+        if(!units || !price || !IMP_DATE_RE.test(String(s.date||""))) return null;
+        return {sellId:uid("s"), date:s.date, units, price, fee:impPosNum(s.fee)||0, note:impStr(s.note,200)};
       }).filter(Boolean)
     };
   }).filter(Boolean);
@@ -3148,6 +3254,48 @@ $("#divBody").onclick = e=>{
     if(confirm("確定刪除此筆配息記錄？")){
       h.dividends = (h.dividends||[]).filter(d=>d.divId!==dl.dataset.ddel);
       lsSet(LS_H,holdings); renderDivTable(); renderPurTable(); renderAll();
+    }
+  }
+};
+
+/* 賣出記錄（僅記錄與標示，不影響持股/損益） */
+function openSellEdit(sid){
+  editSellId = sid;
+  const h = holdings.find(x=>x.id===mngHoldingId);
+  const s = sid ? (h.sells||[]).find(x=>x.sellId===sid) : null;
+  $("#eSellDate").value = s?s.date:todayStr();
+  $("#eSellUnits").value = s?s.units:"";
+  $("#eSellPrice").value = s?s.price:"";
+  $("#eSellFee").value = (s&&s.fee)?s.fee:"";
+  $("#eSellNote").value = s?(s.note||""):"";
+  $("#sellEdit").hidden = false;
+  $("#eSellUnits").focus();
+}
+$("#btnAddSell").onclick = ()=>openSellEdit(null);
+$("#btnSellCancel").onclick = ()=>{ $("#sellEdit").hidden=true; editSellId=null; };
+$("#btnSellSave").onclick = ()=>{
+  const h = holdings.find(x=>x.id===mngHoldingId); if(!h) return;
+  const units = parseFloat($("#eSellUnits").value), price = parseFloat($("#eSellPrice").value), fee = parseFloat($("#eSellFee").value)||0;
+  if(!(units>0)){ toast("賣出股數需大於 0"); return; }
+  if(!(price>0)){ toast("賣出價需大於 0"); return; }
+  const obj = {date:$("#eSellDate").value||todayStr(), units, price, fee:(fee>0?fee:0), note:$("#eSellNote").value.trim()};
+  h.sells = h.sells||[];
+  if(editSellId){ Object.assign(h.sells.find(x=>x.sellId===editSellId), obj); }
+  else { h.sells.push(Object.assign({sellId:uid("s")},obj)); }
+  h.sells.sort((a,b)=>b.date.localeCompare(a.date));
+  lsSet(LS_H,holdings);
+  $("#sellEdit").hidden=true; editSellId=null;
+  renderSellTable(); renderAll();
+  toast("已記錄賣出（不影響持股與損益）");
+};
+$("#sellBody").onclick = e=>{
+  const ed = e.target.closest("button[data-sedit]"), dl = e.target.closest("button[data-sdel]");
+  if(ed){ openSellEdit(ed.dataset.sedit); }
+  else if(dl){
+    const h = holdings.find(x=>x.id===mngHoldingId);
+    if(confirm("確定刪除此筆賣出記錄？")){
+      h.sells = (h.sells||[]).filter(s=>s.sellId!==dl.dataset.sdel);
+      lsSet(LS_H,holdings); renderSellTable(); renderAll();
     }
   }
 };

@@ -1,10 +1,17 @@
 # 基金追蹤分析軟體 — 產品規格書
 
-**版本：** v1.13（前端）／Worker v8<br>
+**版本：** v1.14（前端）／Worker v8<br>
 **日期：** 2026-06-14（v1.1：2026-06-11；v1.0：2026-06-10）<br>
 **作者：** Chan
 
 ---
+
+## v1.14 更新摘要（2026-06-14）— 走勢圖買賣標記（輕量版）
+
+- **賣出記錄資料模型**：持倉新增 `holding.sells[]`（每筆 `{sellId, date, units, price, fee, note}`）。**刻意設計為「只記錄、不入會計」**——賣出僅在走勢圖標示並可看明細，**不影響持有股數（`totUnits`）與損益計算**，不拆分已實現/未實現損益。這是與使用者確認過的輕量版約束，目的是先降低風險，日後再視需要擴充為完整的已實現損益會計。
+- **管理彈窗賣出區**：管理彈窗新增「賣出記錄」表格，可新增/編輯/刪除賣出（欄位依資產型別顯示「股／單位」「每股成交價／每單位贖回淨值」），並顯示累計賣出量；匯入/匯出 JSON 一併消毒 `sells`（重生 ID、數值與日期驗證）。
+- **圖上 B/S 徽章**：單一資產走勢圖以圓形徽章標出 **B**（買入；定期定額橘色 `--rsp`／單筆藍色 `--lump`）與 **S**（賣出；紅色 `--down`），各帶一條淡化垂直虛線；徽章經 `markerPlugin`（`afterDatasetsDraw`）繪製，並記錄命中座標 `ch.$markers`。組合圖亦彙整標示買賣點（不可點）。
+- **點擊看明細**：點擊圖表會以 `handleMarkerClick` 找最近徽章（14px 內）開啟交易明細彈窗 `#dlgTxn`，列出該日所有買入（含定期定額，顯示股數×單價、含費成本、備註）與賣出明細。
 
 ## v1.13 更新摘要（2026-06-14）
 
@@ -351,6 +358,16 @@ GET https://lt.morningstar.com/api/rest.svc/timeseries_price/
         "navAtPurchase": 810.00,
         "note": "單筆買入"
       }
+    ],
+    "sells": [
+      {
+        "sellId": "s_001",
+        "date": "2026-06-05",
+        "units": 2.0,
+        "price": 805.00,
+        "fee": 0,
+        "note": "獲利了結（僅記錄與圖上標示，不影響持股/損益）"
+      }
     ]
   }
 ]
@@ -369,6 +386,11 @@ GET https://lt.morningstar.com/api/rest.svc/timeseries_price/
 | `purchases[].date` | string | 買入日期 YYYY-MM-DD |
 | `purchases[].units` | number | 買入單位數（可手動編輯） |
 | `purchases[].navAtPurchase` | number | 買入當日淨值（手動輸入或 API 查詢） |
+| `sells` | array | 賣出記錄（v1.14；**僅記錄與圖上標示，不影響 `totUnits` 與損益會計**） |
+| `sells[].date` | string | 賣出日期 YYYY-MM-DD |
+| `sells[].units` | number | 賣出單位/股數 |
+| `sells[].price` | number | 賣出單價（每股成交價／每單位贖回淨值） |
+| `sells[].fee` | number | 賣出手續費（選填，預設 0） |
 
 #### 4.1.2 淨值歷史快取
 
