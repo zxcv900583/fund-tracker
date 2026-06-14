@@ -1825,11 +1825,16 @@ function chartXAxisTicks(color,fontSize){
     padding:mobile?10:3,
     font:{size:fontSize},
     autoSkip:true,
-    // ISO 日期縮短為 M/D；營業日/「目前」等標籤維持原樣
+    // 依整體跨距決定日期格式：跨一年以上→年/月，一年內→月/日；非日期標籤（營業日/目前）原樣
     callback:function(value){
       const l = this.getLabelForValue(value);
-      const m = /^\d{4}-(\d{2})-(\d{2})$/.exec(l);
-      return m ? (+m[1])+"/"+(+m[2]) : l;
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(l);
+      if(!m) return l;
+      const labels = this.chart.data.labels || [];
+      const first = labels[0], last = labels[labels.length-1];
+      const spanDays = (typeof first==="string" && typeof last==="string")
+        ? (new Date(last) - new Date(first))/864e5 : 0;
+      return spanDays > 366 ? `${m[1]}/${+m[2]}` : `${+m[2]}/${+m[3]}`;
     }
   };
 }
