@@ -415,7 +415,8 @@ async function run() {
   assert.equal(dlgInfo.markets, 15);
   assert.match(dlgInfo.count, /已選 \d+\/6/);
   assert.ok(dlgInfo.hasIncepRange, "應有『成立至今』區間鈕");
-  await cdp.evaluate(`(()=>{const cb=document.querySelector("#dlgCompare input[data-fund-pick]:checked");cb.checked=false;cb.dispatchEvent(new Event("change",{bubbles:true}));})()`);
+  // 取消勾選假測試基金 holding_b，留下真實的 holding_a（成立至今才能對真基金抓歷史，不打到不存在的 secId）
+  await cdp.evaluate(`(()=>{const cb=document.querySelector('#dlgCompare input[data-fund-pick="holding_b"]');cb.checked=false;cb.dispatchEvent(new Event("change",{bubbles:true}));})()`);
   await cdp.evaluate(`document.querySelector("#btnCompareConfirm").click()`);
   await waitForPage(cdp, `document.querySelector("#dlgCompare").open===false && chart?.data?.datasets?.length===${beforePickerCount - 1}`, 30000);
   // 取消語意：開窗取消勾選但按取消 → 選擇不變

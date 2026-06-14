@@ -537,6 +537,11 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
          前端用 現在 vs 該市場時段 判斷交易中/休市，含時區與假日）②比較選擇改為彈窗
          ＋確定（勾選清單移入 #dlgCompare，底部只留區間＋圖，不再覆蓋圖）
          ③新增「成立至今」區間（比較與單一資產皆用各資產最早資料起算）
+   v1.13 三項：①比較圖補 3日/7日/14日 區間（與主圖一致）②「成立至今」改抓真實
+         全歷史（基金 Morningstar 從 1990 起、股票 range=max 週線；MAX_HIST 放寬到
+         8000，實測統一奔騰回 1998 至今 27.8 年）③手機圖表重新設計：單一資產圖
+         漸層面積填色、移除直向格線與軸框、日期短化(6/12)、線加粗端點白邊；
+         比較圖圖例手機改置底、格線淡化
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
@@ -547,7 +552,7 @@ const LS_H = "fund_tracker_holdings";
 const LS_S = "fund_tracker_settings";
 const LS_FX = "fund_tracker_fx";
 const NAV_PREFIX = "fund_tracker_nav_cache_";
-const MAX_HIST = 3650; // 約 10 年
+const MAX_HIST = 8000; // 約 22 年日線上限；「成立至今」可撈更早資料（股票用週線控制點數）
 const MARKET_API = (location.hostname==="127.0.0.1" || location.hostname==="localhost")
   ? "http://127.0.0.1:8790"
   : "https://fund-tracker-proxy.fund-tracker-proxy.workers.dev";
@@ -571,7 +576,7 @@ const MARKET_INDICES = [
   {symbol:"^VIX", name:"VIX"}
 ];
 const MARKET_RANGES = [
-  ["1日","1bd"],["2日","2bd"],["5日","5bd"],["21日","21bd"],
+  ["1日","1bd"],["2日","2bd"],["3日","3bd"],["5日","5bd"],["7日","7bd"],["14日","14bd"],["21日","21bd"],
   ["1月","1mo"],["3月","3mo"],["6月","6mo"],["1年","1y"],
   ["2年","2y"],["5年","5y"],["10年","10y"],["成立至今","incep"]
 ];
@@ -775,12 +780,29 @@ async function assetSearch(term){
 }
 
 async function stockHistory(symbol, range="10y", fresh=false){
-  const interval = "1d";
+  const interval = range==="max" ? "1wk" : "1d";   // max 用週線，避免數十年日線過多
   const freshQuery = fresh ? `&fresh=1&_=${Date.now()}` : "";
   const payload = await marketFetch(`/api/yahoo/chart?symbol=${encodeURIComponent(symbol)}&range=${range}&interval=${interval}${freshQuery}`,30000);
   const history = parseMarketHistory(payload).map(point=>({date:point.date,nav:point.value}));
   if(history.length<2) throw new Error("股票歷史資料不足");
   return {history,source:payload._meta?.source||"unknown"};
+}
+
+// 「成立至今」：抓取各資產真正的最早資料（基金用 Morningstar 早期起始日、股票用 range=max）
+async function ensureInceptionHistory(h){
+  if(!h || h._inceptionDone) return false;
+  try{
+    if(h.assetType==="stock"){
+      const r = await stockHistory(h.symbol||h.fundCode, "max");
+      mergeHistory(h, r.history, r.source);
+    }else{
+      const hist = await msHistory(h.fundCode, "1990-01-01", todayStr(), h.currency);
+      if(hist.length) mergeHistory(h, hist, "morningstar-inception");
+    }
+    h._inceptionDone = true;
+    lsSet(LS_H, holdings);
+    return true;
+  }catch(e){ console.warn(`成立至今歷史抓取失敗：${h.fundName}`, e); return false; }
 }
 
 // 股票最新報價：與「搜尋」同源（/api/yahoo/quotes，worker 內含台股 TWSE 個股備援），
@@ -1137,12 +1159,12 @@ function renderMarketHistoryChart(series){
       layout:{padding:chartLayoutPadding()},
       interaction:{mode:"index",intersect:false},
       plugins:{
-        legend:{display:true,labels:{color:textColor,boxWidth:16,font:{size:fontSize}}},
+        legend:{display:true,position:window.matchMedia("(max-width:640px)").matches?"bottom":"top",labels:{color:textColor,boxWidth:14,boxHeight:3,font:{size:fontSize},padding:8,usePointStyle:false}},
         tooltip:{callbacks:{label:item=>`${item.dataset.label}：${signed(item.parsed.y,2,"%")}`}}
       },
       scales:{
-        x:{ticks:chartXAxisTicks(textColor,fontSize),grid:{color:gridColor}},
-        y:{position:"right",...chartYHeadroom(datasets.flatMap(d=>d.data)),ticks:{color:textColor,callback:value=>signed(value,1,"%"),font:{size:fontSize}},grid:{color:gridColor}}
+        x:{ticks:chartXAxisTicks(textColor,fontSize),grid:{display:false},border:{display:false}},
+        y:{position:"right",...chartYHeadroom(datasets.flatMap(d=>d.data)),ticks:{color:textColor,callback:value=>signed(value,1,"%"),font:{size:fontSize}},grid:{color:gridColor,drawTicks:false},border:{display:false}}
       }
     }
   });
@@ -1766,6 +1788,19 @@ function chartLayoutPadding(){
     : {bottom:10};
 }
 
+// 線下漸層填色（簡潔股票圖風格）：上方淡色、下方透明
+function areaFillGradient(color){
+  return (ctx)=>{
+    const area = ctx.chart.chartArea;
+    if(!area) return "transparent";
+    const g = ctx.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+    const hex = /^#[0-9a-f]{6}$/i.test(color) ? color : "#16a34a";
+    g.addColorStop(0, hex+"38");
+    g.addColorStop(1, hex+"00");
+    return g;
+  };
+}
+
 // 動態上下緩衝：折線末端急拉到峰值時，上方多留空間，避免最高點頂到上緣被切
 function chartYHeadroom(values){
   const finite = (values||[]).filter(Number.isFinite);
@@ -1785,10 +1820,17 @@ function chartXAxisTicks(color,fontSize){
   return {
     color,
     maxTicksLimit:chartTickLimit(),
-    maxRotation:mobile?30:45,
+    maxRotation:mobile?0:40,    // 手機不旋轉、短日期更清爽
     minRotation:0,
     padding:mobile?10:3,
-    font:{size:fontSize}
+    font:{size:fontSize},
+    autoSkip:true,
+    // ISO 日期縮短為 M/D；營業日/「目前」等標籤維持原樣
+    callback:function(value){
+      const l = this.getLabelForValue(value);
+      const m = /^\d{4}-(\d{2})-(\d{2})$/.exec(l);
+      return m ? (+m[1])+"/"+(+m[2]) : l;
+    }
   };
 }
 
@@ -1934,10 +1976,10 @@ function renderPortfolioChart(){
         }}
       },
       scales:{
-        x:{ticks:chartXAxisTicks(txtCol,fontSize),grid:{color:gridCol}},
+        x:{ticks:chartXAxisTicks(txtCol,fontSize),grid:{display:false},border:{display:false}},
         y:{position:"right", ...chartYHeadroom(datasets.flatMap(d=>d.data)), ticks:{color:txtCol, font:{size:fontSize},
             callback:v=> usePct ? v.toFixed(1)+"%" : "NT$"+(Math.abs(v)>=10000? (v/10000).toFixed(1)+"萬" : Math.round(v))},
-           grid:{color:gridCol}}
+           grid:{color:gridCol,drawTicks:false},border:{display:false}}
       }
     }
   };
@@ -1982,12 +2024,14 @@ function renderChart(){
   const txtCol = getComputedStyle(document.body).getPropertyValue("--muted").trim();
   const fontSize = chartFontSize();
 
+  const mobile = window.matchMedia("(max-width:640px)").matches;
   const cfg = {
     type:"line",
     data:{labels, datasets:[{
-      data:vals, borderColor:lineCol, borderWidth:1.6, tension:0,
-      pointRadius:vals.map((_,i)=>i===lastIdx?3.5:0),
-      pointBackgroundColor:lineCol, fill:false, spanGaps:true
+      data:vals, borderColor:lineCol, borderWidth:mobile?2.4:2, tension:0.15,
+      pointRadius:vals.map((_,i)=>i===lastIdx?(mobile?4.5:4):0),
+      pointBackgroundColor:lineCol, pointBorderColor:"#fff", pointBorderWidth:1.5,
+      pointHoverRadius:5, fill:"start", backgroundColor:areaFillGradient(lineCol), spanGaps:true
     }]},
     options:{
       responsive:true, maintainAspectRatio:false, animation:false,
@@ -2012,10 +2056,11 @@ function renderChart(){
         }
       },
       scales:{
-        x:{ticks:chartXAxisTicks(txtCol,fontSize),grid:{color:gridCol}},
-        y:{position:"right", ...chartYHeadroom(vals), ticks:{color:txtCol, font:{size:fontSize},
+        x:{ticks:chartXAxisTicks(txtCol,fontSize), grid:{display:false}, border:{display:false}},
+        y:{position:"right", ...chartYHeadroom(vals),
+           ticks:{color:txtCol, font:{size:fontSize}, maxTicksLimit:mobile?5:7,
             callback:v=> usePct ? v.toFixed(1)+"%" : fmtN(v, v>=100?0:2)},
-           grid:{color:gridCol}}
+           grid:{color:gridCol, drawTicks:false}, border:{display:false}}
       }
     }
   };
@@ -2914,12 +2959,20 @@ $("#btnCompareConfirm").onclick = ()=>{
     if(window.matchMedia("(max-width:640px)").matches) $("#chartWrap")?.scrollIntoView({behavior:"smooth",block:"center"});
   }).catch(()=>{});
 };
-$("#marketRanges").onclick = event=>{
+$("#marketRanges").onclick = async event=>{
   const button = event.target.closest("[data-market-range]");
   if(!button || button.dataset.marketRange===marketRange) return;
   marketRange = button.dataset.marketRange;
   persistMarketSettings();
   renderMarketControls();
+  // 成立至今：先補齊各庫存資產的真實全歷史（基金 Morningstar 早期、股票 max）
+  if(marketRange==="incep"){
+    const pend = compareFundIds.map(id=>holdings.find(h=>h.id===id)).filter(h=>h && !h._inceptionDone);
+    if(pend.length){
+      $("#marketHistoryStatus").innerHTML = '<span class="spin"></span> 載入成立至今完整歷史…';
+      await Promise.allSettled(pend.map(ensureInceptionHistory));
+    }
+  }
   loadMarketHistory(false);
 };
 $("#btnMarketHistoryRefresh").onclick = ()=>loadMarketHistory(true);
@@ -3000,7 +3053,7 @@ document.querySelectorAll("thead th[data-k]").forEach(th=>{
     renderTable();
   };
 });
-$("#rangeTabs").onclick = e=>{
+$("#rangeTabs").onclick = async e=>{
   const b = e.target.closest(".tab"); if(!b||b.disabled) return;
   if(b.dataset.r==="自訂"){
     $("#crStart").value = customRange?customRange.start:addDays(todayStr(),-90);
@@ -3010,6 +3063,12 @@ $("#rangeTabs").onclick = e=>{
   }
   curRange = b.dataset.r;
   settings.defaultChartRange = curRange; lsSet(LS_S,settings);
+  // 成立至今：先補齊該資產真實全歷史
+  const sel = holdings.find(h=>h.id===selectedId);
+  if(curRange==="成立至今" && sel && !sel._inceptionDone){
+    toast("載入成立至今完整歷史…", 4000);
+    await ensureInceptionHistory(sel);
+  }
   renderAll();
 };
 $("#btnRangeOk").onclick = ()=>{
