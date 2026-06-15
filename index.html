@@ -588,6 +588,11 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
          依預設日期(今天)先用快取靜默預填。優先用本地快取(瞬間、免連網)，基金
          查無快取才自動連 Morningstar API 補；股票無快取則提示先「更新」抓歷史。
          新增 navOnOrBefore(取該日或之前最近交易日) 與 autoFillNavForDate()。
+   v1.16 兩項：①修正股價/淨值浮點雜訊（Yahoo 32-bit float 如 1873.8707275390625
+         其實是 1873.87）——新增 cleanPrice/cleanAmount，輸入框顯示、自動帶入、
+         儲存皆四捨五入（價格 ≥100 取 2 位、<100 取 4 位，與表格 fmtN 一致）
+         ②賣出表單同樣支援「選好日期自動帶入當日數值」（autoFillSellPriceForDate，
+         掛 #eSellDate change；基金沒快取改用 msHistory 補），仍不影響持股與損益。
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
@@ -2223,12 +2228,15 @@ function syncUnits(amtEl, navEl, unitsEl){
   const a = parseFloat(amtEl.value), n = parseFloat(navEl.value);
   if(a>0 && n>0) unitsEl.value = +(a/n).toFixed(4);
 }
+// 去除浮點雜訊：價格 ≥100 取 2 位、<100 取 4 位（與表格 fmtN 一致）；金額去到 4 位
+function cleanPrice(v){ const n=+v; if(!isFinite(n)||n<=0) return ""; return +n.toFixed(n>=100?2:4); }
+function cleanAmount(v){ const n=+v; if(!isFinite(n)||n<=0) return ""; return +n.toFixed(4); }
 async function navLookup(secId, currency, dateStr, inputEl, btn){
   if(!dateStr){ toast("請先選擇買入日期"); return; }
   btn.disabled=true; const old=btn.textContent; btn.textContent="…";
   try{
     const list = await msHistory(secId, addDays(dateStr,-10), dateStr, currency);
-    if(list.length){ inputEl.value = list[list.length-1].nav; toast("已帶入 "+list[list.length-1].date+" 淨值"); }
+    if(list.length){ inputEl.value = cleanPrice(list[list.length-1].nav); toast("已帶入 "+list[list.length-1].date+" 淨值"); }
     else toast("查無該日期附近的淨值，請手動輸入");
   }catch(e){ toast("查詢失敗："+e.message); }
   btn.disabled=false; btn.textContent=old;
@@ -2240,7 +2248,7 @@ async function autoFillNavForDate({silent=false, cacheOnly=false}={}){
   const navInput = $("#eNav");
   const hit = navOnOrBefore(getCache(h).navHistory, dateStr, 10);
   if(hit){
-    navInput.value = hit.nav;
+    navInput.value = cleanPrice(hit.nav);
     if(h.assetType==="stock") syncStockEditAmount();
     else if(parseFloat($("#eAmt").value)>0) syncUnits($("#eAmt"), navInput, $("#eUnits"));
     if(!silent) toast(h.assetType==="stock" ? `已帶入 ${hit.date} 收盤價（可修改）` : `已帶入 ${hit.date} 淨值`);
@@ -2249,6 +2257,26 @@ async function autoFillNavForDate({silent=false, cacheOnly=false}={}){
   if(cacheOnly) return;                 // 開啟表單時只用快取預填，不主動連網
   if(h.assetType!=="stock") navLookup(h.fundCode, h.currency, dateStr, navInput, $("#btnENavLookup"));
   else if(!silent) toast("快取無該日股價，請先點『⟳ 更新』抓取歷史或手動輸入");
+}
+// 賣出表單：選好賣出日 → 自動帶入當日數值（基金=淨值、股票=收盤價，可手動覆寫）
+async function autoFillSellPriceForDate({silent=false, cacheOnly=false}={}){
+  const h = holdings.find(x=>x.id===mngHoldingId); if(!h) return;
+  const dateStr = $("#eSellDate").value; if(!dateStr) return;
+  const priceInput = $("#eSellPrice");
+  const hit = navOnOrBefore(getCache(h).navHistory, dateStr, 10);
+  if(hit){
+    priceInput.value = cleanPrice(hit.nav);
+    if(!silent) toast(h.assetType==="stock" ? `已帶入 ${hit.date} 收盤價（可修改）` : `已帶入 ${hit.date} 淨值`);
+    return;
+  }
+  if(cacheOnly) return;
+  if(h.assetType!=="stock"){
+    try{
+      const list = await msHistory(h.fundCode, addDays(dateStr,-10), dateStr, h.currency);
+      if(list.length){ priceInput.value = cleanPrice(list[list.length-1].nav); if(!silent) toast("已帶入 "+list[list.length-1].date+" 淨值"); return; }
+    }catch(e){}
+    if(!silent) toast("查無該日附近淨值，請手動輸入");
+  } else if(!silent) toast("快取無該日股價，請先點『⟳ 更新』抓取歷史或手動輸入");
 }
 async function confirmAdd(){
   if(!picked) return;
@@ -2468,9 +2496,9 @@ function openPurEdit(pid){
   $("#eAmt").readOnly = isStock;
   $("#eDate").value = p?p.date:todayStr();
   $("#eUnits").value = p?p.units:"";
-  $("#eAmt").value = p ? ((p.amount!=null)?p.amount:(+p.units||0)*(+p.navAtPurchase||0)) : "";
+  $("#eAmt").value = p ? cleanAmount((p.amount!=null)?p.amount:(+p.units||0)*(+p.navAtPurchase||0)) : "";
   $("#eFee").value = (p&&p.fee)?p.fee:"";
-  $("#eNav").value = p?p.navAtPurchase:"";
+  $("#eNav").value = p?cleanPrice(p.navAtPurchase):"";
   $("#eNote").value = p?(p.note||""):"";
   $("#purEdit").hidden = false;
   if(isStock) syncStockEditAmount();
@@ -2486,12 +2514,12 @@ function syncStockEditAmount(){
 }
 function savePur(){
   const h = holdings.find(x=>x.id===mngHoldingId); if(!h) return;
-  const nav = parseFloat($("#eNav").value);
+  const nav = cleanPrice(parseFloat($("#eNav").value)) || parseFloat($("#eNav").value);
   const amt = parseFloat($("#eAmt").value), fee = parseFloat($("#eFee").value)||0;
   if(amt>0 && nav>0 && !$("#eUnits").value) syncUnits($("#eAmt"), $("#eNav"), $("#eUnits"));
   const units = parseFloat($("#eUnits").value);
   if(!(units>0)||!(nav>0)){ toast(h.assetType==="stock"?"股數與每股成交價需大於 0":"淨值與（金額或單位數）需大於 0"); return; }
-  const principal = h.assetType==="stock" ? units*nav : amt;
+  const principal = cleanAmount(h.assetType==="stock" ? units*nav : amt) || null;
   const obj = {type:h.assetType==="stock"?"LUMP":document.querySelector("input[name=eType]:checked").value, date:$("#eDate").value||todayStr(), units, navAtPurchase:nav,
     amount:(principal>0?principal:null), fee:(fee>0?fee:0), note:$("#eNote").value.trim()};
   if(editPurId){
@@ -3298,19 +3326,22 @@ function openSellEdit(sid){
   const s = sid ? (h.sells||[]).find(x=>x.sellId===sid) : null;
   $("#eSellDate").value = s?s.date:todayStr();
   $("#eSellUnits").value = s?s.units:"";
-  $("#eSellPrice").value = s?s.price:"";
+  $("#eSellPrice").value = s?cleanPrice(s.price):"";
   $("#eSellFee").value = (s&&s.fee)?s.fee:"";
   $("#eSellNote").value = s?(s.note||""):"";
   $("#sellEdit").hidden = false;
+  if(!s) autoFillSellPriceForDate({silent:true, cacheOnly:true});   // 新增時依預設日期(今天)先用快取預填
   $("#eSellUnits").focus();
 }
+$("#eSellDate").addEventListener("change", ()=>autoFillSellPriceForDate());   // 選好賣出日→自動帶入當日數值
 $("#btnAddSell").onclick = ()=>openSellEdit(null);
 $("#btnSellCancel").onclick = ()=>{ $("#sellEdit").hidden=true; editSellId=null; };
 $("#btnSellSave").onclick = ()=>{
   const h = holdings.find(x=>x.id===mngHoldingId); if(!h) return;
-  const units = parseFloat($("#eSellUnits").value), price = parseFloat($("#eSellPrice").value), fee = parseFloat($("#eSellFee").value)||0;
+  const units = parseFloat($("#eSellUnits").value), priceRaw = parseFloat($("#eSellPrice").value), fee = parseFloat($("#eSellFee").value)||0;
   if(!(units>0)){ toast("賣出股數需大於 0"); return; }
-  if(!(price>0)){ toast("賣出價需大於 0"); return; }
+  if(!(priceRaw>0)){ toast("賣出價需大於 0"); return; }
+  const price = cleanPrice(priceRaw) || priceRaw;
   const obj = {date:$("#eSellDate").value||todayStr(), units, price, fee:(fee>0?fee:0), note:$("#eSellNote").value.trim()};
   h.sells = h.sells||[];
   if(editSellId){ Object.assign(h.sells.find(x=>x.sellId===editSellId), obj); }

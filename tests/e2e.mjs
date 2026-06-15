@@ -564,7 +564,7 @@ async function run() {
   assert.equal(stockManagement.scheduleHidden, true);
   assert.equal(stockManagement.dividendVisible, true);
 
-  // 自動帶入：開啟新增買入即依預設日期預填，改日期則帶入該日快取股價（可手動覆寫）
+  // 自動帶入：開啟新增買入即依預設日期預填，改日期則帶入該日快取股價（四捨五入去浮點雜訊，可手動覆寫）
   const autoFill = await cdp.evaluate(`(async()=>{
     document.querySelector("#btnAddPur").click();              // openPurEdit(null)：開啟即靜默預填
     await new Promise(r=>setTimeout(r,150));
@@ -576,9 +576,32 @@ async function run() {
     await new Promise(r=>setTimeout(r,150));
     return {prefill, pickNav:pick.nav, filled:document.querySelector("#eNav").value};
   })()`);
+  const cleanExpect = (v) => +(+v).toFixed(v >= 100 ? 2 : 4);
+  const decimals = (s) => (String(s).split(".")[1] || "").length;
   assert.ok(parseFloat(autoFill.prefill) > 0, "開啟新增買入應依預設日期自動預填股價");
-  assert.equal(parseFloat(autoFill.filled), autoFill.pickNav, "選好日期應自動帶入該日快取股價");
+  assert.equal(parseFloat(autoFill.filled), cleanExpect(autoFill.pickNav), "選好日期應自動帶入該日快取股價（四捨五入後）");
+  assert.ok(decimals(autoFill.filled) <= 4, `自動帶入價不應有浮點雜訊長尾：${autoFill.filled}`);
+  assert.ok(decimals(autoFill.prefill) <= 4, `預填價不應有浮點雜訊長尾：${autoFill.prefill}`);
   console.log("[e2e] purchase price auto-fill passed:", JSON.stringify(autoFill));
+
+  // 賣出表單同樣自動帶入當日數值，且去浮點雜訊
+  const sellFill = await cdp.evaluate(`(async()=>{
+    document.querySelector("#btnAddSell").click();             // openSellEdit(null)：開啟即靜默預填
+    await new Promise(r=>setTimeout(r,150));
+    const prefill = document.querySelector("#eSellPrice").value;
+    const hist = JSON.parse(localStorage.getItem("fund_tracker_nav_cache_2330.TW")).navHistory;
+    const pick = hist[Math.floor(hist.length*0.4)];
+    const el = document.querySelector("#eSellDate");
+    el.value = pick.date; el.dispatchEvent(new Event("change",{bubbles:true}));
+    await new Promise(r=>setTimeout(r,150));
+    const filled = document.querySelector("#eSellPrice").value;
+    document.querySelector("#btnSellCancel").click();          // 不儲存，避免改動持倉
+    return {prefill, pickNav:pick.nav, filled};
+  })()`);
+  assert.ok(parseFloat(sellFill.prefill) > 0, "開啟新增賣出應依預設日期自動預填價格");
+  assert.equal(parseFloat(sellFill.filled), cleanExpect(sellFill.pickNav), "賣出選好日期應自動帶入該日快取價（四捨五入後）");
+  assert.ok(decimals(sellFill.filled) <= 4, `賣出自動帶入價不應有浮點雜訊長尾：${sellFill.filled}`);
+  console.log("[e2e] sell price auto-fill passed:", JSON.stringify(sellFill));
 
   await cdp.evaluate(`document.querySelector("#dlgMng").close()`);
   console.log("[e2e] stock management passed");
