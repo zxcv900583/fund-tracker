@@ -603,6 +603,38 @@ async function run() {
   assert.ok(decimals(sellFill.filled) <= 4, `賣出自動帶入價不應有浮點雜訊長尾：${sellFill.filled}`);
   console.log("[e2e] sell price auto-fill passed:", JSON.stringify(sellFill));
 
+  // 0 股觀察用：可儲存 0 股買入（成本/損益 0、不影響既有持股），驗證後刪除還原
+  const watchZero = await cdp.evaluate(`(async()=>{
+    const before = totUnits(holdings.find(x=>x.symbol==="2330.TW"));
+    document.querySelector("#btnAddPur").click();             // openPurEdit(null)
+    await new Promise(r=>setTimeout(r,150));
+    document.querySelector("#eUnits").value="0";
+    document.querySelector("#eUnits").dispatchEvent(new Event("input",{bubbles:true}));
+    await new Promise(r=>setTimeout(r,80));
+    const amtField = document.querySelector("#eAmt").value;   // 0 股 → 成交金額空
+    document.querySelector("#btnPurSave").click();
+    await new Promise(r=>setTimeout(r,150));
+    const saved = document.querySelector("#purEdit").hidden;  // 存檔成功才會關閉編輯區
+    const h = holdings.find(x=>x.symbol==="2330.TW");
+    const zero = h.purchases.find(p=>+p.units===0);
+    const after = totUnits(h);
+    let restored = after;
+    if(zero){                                                 // 還原：刪掉這筆 0 股
+      window.confirm = ()=>true;
+      const del=[...document.querySelectorAll("#purBody button[data-pdel]")].find(b=>b.dataset.pdel===zero.purchaseId);
+      if(del){ del.click(); await new Promise(r=>setTimeout(r,150)); }
+      restored = totUnits(holdings.find(x=>x.symbol==="2330.TW"));
+    }
+    return {before, after, saved, hadZero:!!zero, zeroAmount:zero?zero.amount:undefined, amtField, restored};
+  })()`);
+  assert.ok(watchZero.saved, "0 股買入應可儲存（觀察用），不應被擋");
+  assert.ok(watchZero.hadZero, "應存在一筆 0 股買入");
+  assert.equal(watchZero.zeroAmount, null, "0 股買入的成交金額應為 null（成本 0）");
+  assert.equal(watchZero.amtField, "", "0 股時成交金額欄應為空");
+  assert.equal(watchZero.after, watchZero.before, "新增 0 股不應改變既有持股數");
+  assert.equal(watchZero.restored, watchZero.before, "刪除 0 股觀察後持股應還原");
+  console.log("[e2e] zero-share watch holding passed:", JSON.stringify(watchZero));
+
   await cdp.evaluate(`document.querySelector("#dlgMng").close()`);
   console.log("[e2e] stock management passed");
 

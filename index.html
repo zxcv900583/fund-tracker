@@ -593,6 +593,10 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
          儲存皆四捨五入（價格 ≥100 取 2 位、<100 取 4 位，與表格 fmtN 一致）
          ②賣出表單同樣支援「選好日期自動帶入當日數值」（autoFillSellPriceForDate，
          掛 #eSellDate change；基金沒快取改用 msHistory 補），仍不影響持股與損益。
+   v1.17 觀察用持倉（0 股）：買入股數/單位數可填 0 → 成本、現值、損益皆為 0，
+         但仍保留價格與走勢圖，方便純追蹤趨勢。放寬 savePur/confirmStock/confirmAdd
+         驗證（0 股不需價格、不存成交金額），rowData 改 value=units*nav（0 股→0）。
+         報酬率因成本 0 顯示「—」，XIRR 不計入；表格與摘要無 NaN。
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
@@ -1712,8 +1716,8 @@ function holdingPriceMetaHtml(h,date){
 function rowData(h){
   const l = latest(h), p = prev(h);
   const units = totUnits(h), cost = totCost(h), div = totDiv(h);
-  const value = (l&&units>0) ? units*l.nav : null;
-  const pl = (value!=null) ? value+div-cost : null;   // 含息損益
+  const value = l ? units*l.nav : null;               // 0 股（觀察用）→ 現值 0
+  const pl = (value!=null) ? value+div-cost : null;   // 含息損益（0 股且成本 0 → 損益 0）
   return {
     h, name:h.fundName, nav:l?l.nav:null, navDate:l?l.date:null,
     dayChg: (l&&p)? l.nav-p.nav : null, dayChgPct:(l&&p)? (l.nav-p.nav)/p.nav*100 : null,
@@ -2280,12 +2284,14 @@ async function autoFillSellPriceForDate({silent=false, cacheOnly=false}={}){
 }
 async function confirmAdd(){
   if(!picked) return;
-  const nav = parseFloat($("#pNav").value);
+  const navRaw = parseFloat($("#pNav").value);
+  const nav = navRaw>0 ? cleanPrice(navRaw) : 0;
   const amt = parseFloat($("#pAmt").value), fee = parseFloat($("#pFee").value)||0;
-  if(!(nav>0)){ toast("請輸入買入淨值"); return; }
-  if(amt>0 && !$("#pUnits").value) syncUnits($("#pAmt"), $("#pNav"), $("#pUnits"));
-  const units = parseFloat($("#pUnits").value);
-  if(!(units>0)){ toast("請輸入買入金額或單位數"); return; }
+  if(amt>0 && nav>0 && !$("#pUnits").value) syncUnits($("#pAmt"), $("#pNav"), $("#pUnits"));
+  const units = parseFloat($("#pUnits").value) || 0;
+  if(units<0){ toast("單位數不可為負"); return; }
+  // 0 單位＝僅追蹤走勢（成本與損益為 0）；有單位數時才需要淨值
+  if(units>0 && !(nav>0)){ toast("請輸入買入淨值與（金額或單位數）"); return; }
   let h = holdings.find(x=>x.fundCode===picked.secId);
   if(!h){
     h = {id:uid("holding"), assetType:"fund", fundCode:picked.secId, fundName:picked.name, currency:picked.currency, isin:picked.isin, purchases:[], dividends:[], rspPlans:[]};
@@ -2293,7 +2299,7 @@ async function confirmAdd(){
   }
   h.purchases.push({purchaseId:uid("p"), type:document.querySelector("input[name=pType]:checked").value,
     date:$("#pDate").value||todayStr(), units, navAtPurchase:nav,
-    amount:(amt>0?amt:null), fee:(fee>0?fee:0), note:$("#pNote").value.trim()});
+    amount:(units>0&&amt>0?amt:null), fee:(fee>0?fee:0), note:$("#pNote").value.trim()});
   h.purchases.sort((a,b)=>b.date.localeCompare(a.date));
   lsSet(LS_H, holdings);
   selectedId = h.id;
@@ -2365,8 +2371,8 @@ async function confirmStock(){
   const shares = parseFloat($("#stockShares").value);
   const price = parseFloat($("#stockPrice").value);
   const fee = parseFloat($("#stockFee").value)||0;
-  if(!(shares>0)){ toast("請輸入股數"); return; }
-  if(!(price>0)){ toast("請輸入每股成交價"); return; }
+  if(isNaN(shares) || shares<0){ toast("股數不可為負（填 0＝僅追蹤走勢）"); return; }
+  if(shares>0 && !(price>0)){ toast("請輸入每股成交價"); return; }
   if(fee<0){ toast("手續費不可為負數"); return; }
   let h = holdings.find(item=>item.assetType==="stock" && item.symbol===pickedStock.symbol);
   if(!h){
@@ -2391,8 +2397,8 @@ async function confirmStock(){
     type:"LUMP",
     date:$("#stockDate").value||todayStr(),
     units:shares,
-    navAtPurchase:price,
-    amount:+(shares*price).toFixed(6),
+    navAtPurchase: price>0 ? cleanPrice(price) : 0,
+    amount: shares>0 ? +(shares*(price>0?price:0)).toFixed(6) : null,
     fee:fee>0?fee:0,
     note:$("#stockNote").value.trim()
   });
@@ -2401,7 +2407,7 @@ async function confirmStock(){
   selectedId = h.id;
   $("#dlgStock").close();
   renderAll();
-  toast(`已加入 ${pickedStock.symbol} · ${fmtN(shares,4)} 股`);
+  toast(shares>0 ? `已加入 ${pickedStock.symbol} · ${fmtN(shares,4)} 股` : `已加入 ${pickedStock.symbol}（僅追蹤走勢，成本與損益為 0）`);
   await updateFund(h,{full:true,fresh:true});
   renderAll();
 }
@@ -2514,12 +2520,15 @@ function syncStockEditAmount(){
 }
 function savePur(){
   const h = holdings.find(x=>x.id===mngHoldingId); if(!h) return;
-  const nav = cleanPrice(parseFloat($("#eNav").value)) || parseFloat($("#eNav").value);
+  const navRaw = parseFloat($("#eNav").value);
+  const nav = navRaw>0 ? cleanPrice(navRaw) : 0;
   const amt = parseFloat($("#eAmt").value), fee = parseFloat($("#eFee").value)||0;
   if(amt>0 && nav>0 && !$("#eUnits").value) syncUnits($("#eAmt"), $("#eNav"), $("#eUnits"));
   const units = parseFloat($("#eUnits").value);
-  if(!(units>0)||!(nav>0)){ toast(h.assetType==="stock"?"股數與每股成交價需大於 0":"淨值與（金額或單位數）需大於 0"); return; }
-  const principal = cleanAmount(h.assetType==="stock" ? units*nav : amt) || null;
+  if(isNaN(units) || units<0){ toast("股數不可為負"); return; }
+  // 0 股＝僅追蹤走勢（成本與損益為 0）；有股數時才需要價格
+  if(units>0 && !(nav>0)){ toast(h.assetType==="stock"?"每股成交價需大於 0":"買入淨值需大於 0"); return; }
+  const principal = (units>0) ? (cleanAmount(h.assetType==="stock" ? units*nav : amt) || null) : null;
   const obj = {type:h.assetType==="stock"?"LUMP":document.querySelector("input[name=eType]:checked").value, date:$("#eDate").value||todayStr(), units, navAtPurchase:nav,
     amount:(principal>0?principal:null), fee:(fee>0?fee:0), note:$("#eNote").value.trim()};
   if(editPurId){
