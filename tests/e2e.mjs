@@ -638,7 +638,7 @@ async function run() {
   await cdp.evaluate(`document.querySelector("#dlgMng").close()`);
   console.log("[e2e] stock management passed");
 
-  // 買賣標記：圖上標 B/S、點 S 看明細、賣出不影響持股（輕量版約束）
+  // 買賣標記：圖上標 B/S、點 S 看明細；賣出以平均成本法扣減持股、計入已實現損益
   await cdp.evaluate(`[...document.querySelectorAll("#tbody tr[data-id]")].find(tr=>tr.textContent.includes("2330.TW")).click()`);
   await waitForPage(cdp, `chartView==="fund" && chart?.data?.datasets?.length===1 && (chart.options.plugins?.markers?.meta?.labels||[]).length>20`, 30000);
   const markerTest = await cdp.evaluate(`(async()=>{
@@ -646,8 +646,10 @@ async function run() {
     const buyLabel = labels[Math.floor(labels.length*0.2)];
     const sellLabel = labels[Math.floor(labels.length*0.8)];
     const h = holdings.find(item=>item.symbol==="2330.TW");
-    const unitsBefore = totUnits(h);
-    h.purchases[0].date = buyLabel;                 // 對齊既有買入到可見 label（不改股數）
+    h.sells = [];                                   // 先量測賣出前持股與均價
+    h.purchases[0].date = buyLabel;                 // 對齊既有買入到可見 label
+    renderAll(); await new Promise(r=>setTimeout(r,100));
+    const unitsBefore = totUnits(h), avgBefore = avgNav(h);
     h.sells = [{sellId:"s_e2e", date:sellLabel, units:5, price:100, fee:0, note:"e2e賣出"}];
     renderAll();
     await new Promise(r=>setTimeout(r,300));
@@ -661,16 +663,20 @@ async function run() {
       detail={open:dlg.open, tags:[...dlg.querySelectorAll(".txn-tag")].map(t=>t.textContent.trim()), hasSell:document.querySelector("#txnDetailBody").textContent.includes("賣出")};
       dlg.close();
     }
-    return {buyLabel, sellLabel, markerDates, unitsBefore, unitsAfter:totUnits(h), sellsCount:h.sells.length, detail};
+    const pos = positionOf(h);
+    return {buyLabel, sellLabel, markerDates, unitsBefore, avgBefore, unitsAfter:pos.held, realized:pos.realized, sellsCount:h.sells.length, detail};
   })()`);
   assert.ok(markerTest.markerDates.includes(markerTest.buyLabel), "圖上應有買入(B)標記：" + JSON.stringify(markerTest.markerDates));
   assert.ok(markerTest.markerDates.includes(markerTest.sellLabel), "圖上應有賣出(S)標記");
-  assert.equal(markerTest.unitsAfter, markerTest.unitsBefore, "賣出不得改變持股數（輕量版：不拆已實現）");
+  assert.equal(markerTest.unitsAfter, markerTest.unitsBefore - 5, "賣出 5 應扣減持股");
+  const expectedRealized = 5*100 - 5*markerTest.avgBefore;   // 平均成本法
+  assert.ok(Math.abs(markerTest.realized - expectedRealized) < 0.01,
+    `已實現損益應為 5×(100−均價 ${markerTest.avgBefore})=${expectedRealized.toFixed(2)}，實際 ${markerTest.realized}`);
   assert.equal(markerTest.sellsCount, 1);
   assert.ok(markerTest.detail && markerTest.detail.open, "點擊 S 標記應開啟交易明細彈窗");
   assert.deepEqual(markerTest.detail.tags, ["S"]);
   assert.ok(markerTest.detail.hasSell, "明細應含賣出資訊");
-  console.log("[e2e] buy/sell markers + detail passed:", JSON.stringify({markers:markerTest.markerDates, units:markerTest.unitsAfter}));
+  console.log("[e2e] buy/sell markers + realized P&L passed:", JSON.stringify({markers:markerTest.markerDates, unitsAfter:markerTest.unitsAfter, realized:markerTest.realized}));
 
   await cdp.evaluate(`(() => {
     const h=JSON.parse(localStorage.getItem("fund_tracker_holdings")).find(item=>item.symbol==="2330.TW");

@@ -448,7 +448,7 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
           <button class="btn primary" id="btnSellSave">儲存</button>
         </div>
       </div>
-      <div class="note">賣出僅作記錄並在走勢圖標示「S」、可點開看明細；目前<b>不影響持有股數與損益計算</b>（未拆已實現損益）。</div>
+      <div class="note">賣出會<b>以平均成本法計入損益</b>：扣減持有股數、計算已實現損益，並在走勢圖標示「S」、可點開看明細。總損益＝未實現＋已實現＋配息。</div>
     </div>
 
     <div id="rspSection" style="border-top:2px solid var(--border);margin-top:14px;padding-top:10px">
@@ -597,6 +597,12 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
          但仍保留價格與走勢圖，方便純追蹤趨勢。放寬 savePur/confirmStock/confirmAdd
          驗證（0 股不需價格、不存成交金額），rowData 改 value=units*nav（0 股→0）。
          報酬率因成本 0 顯示「—」，XIRR 不計入；表格與摘要無 NaN。
+   v1.18 賣出計入損益（平均成本法）：新增 positionOf(h) 重播買入/賣出 → 持有股數
+         (已扣賣出)、剩餘成本、已實現損益。totUnits/totCost/avgNav 改用之；
+         rowData 總損益＝未實現＋已實現＋配息，報酬率以累計投入為分母；fundXirr/
+         renderHeader 把賣出 proceeds 計入現金流；組合圖隨賣出日減少持有與成本、
+         tooltip 計入已實現；管理彈窗顯示未實現/已實現拆分、賣出表顯示累計已實現；
+         賣超持有量會提示（超出部分不計）。買入表「合計」維持累計買入（與列一致）。
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
@@ -670,7 +676,7 @@ function normalizeHoldings(){
     h.purchases = h.purchases||[];
     h.dividends = h.dividends||[];
     h.rspPlans  = h.rspPlans||[];
-    h.sells     = h.sells||[];   // 賣出記錄（僅標示與明細，不影響持股/損益計算）
+    h.sells     = h.sells||[];   // 賣出記錄（平均成本法計入損益：扣減持股、算已實現）
   });
 }
 normalizeHoldings();
@@ -1627,12 +1633,35 @@ async function updateAll(options={}){
 }
 
 /* ---------------- 計算 ---------------- */
-function totUnits(h){ return h.purchases.reduce((s,p)=>s+(+p.units||0),0); }
 // 單筆買入成本：有填金額用金額（更精確），否則 單位×淨值；皆加上手續費
 const purCost = p => ((p.amount!=null && !isNaN(+p.amount) && +p.amount>0) ? +p.amount : (+p.units||0)*(+p.navAtPurchase||0)) + (+p.fee||0);
-function totCost(h){ return h.purchases.reduce((s,p)=>s+purCost(p),0); }
+// 平均成本法重播買入/賣出 → 持有股數、剩餘成本、已實現損益（同日視賣出晚於買入）
+function positionOf(h){
+  const evts = [];
+  (h.purchases||[]).forEach(p=> evts.push({date:p.date||"", k:0, units:+p.units||0, cost:purCost(p)}));
+  (h.sells||[]).forEach(s=> evts.push({date:s.date||"", k:1, units:+s.units||0, price:+s.price||0, fee:+s.fee||0}));
+  evts.sort((a,b)=> (a.date<b.date?-1:a.date>b.date?1:0) || (a.k-b.k));
+  let held=0, basis=0, realized=0, sold=0, proceeds=0;
+  for(const e of evts){
+    if(e.k===0){ held+=e.units; basis+=e.cost; }
+    else {
+      const u = Math.min(e.units, held);           // 不允許賣超過持有，多餘忽略
+      const avg = held>1e-9 ? basis/held : 0;
+      const costSold = avg*u;
+      realized += (u*e.price - e.fee) - costSold;
+      proceeds += u*e.price - e.fee;
+      sold += u; held -= u; basis -= costSold;
+    }
+  }
+  if(held<1e-9){ held=0; basis=0; }                // 清浮點殘留
+  const grossInvested = (h.purchases||[]).reduce((s,p)=>s+purCost(p),0);
+  return {held, basis, avgCost: held>0?basis/held:null, realized, sold, proceeds, grossInvested};
+}
+function totUnits(h){ return positionOf(h).held; }                 // 目前持有（已扣賣出）
+function totCost(h){ return positionOf(h).basis; }                 // 持有部位剩餘成本
 function totDiv(h){ return (h.dividends||[]).reduce((s,d)=>s+(+d.amount||0),0); }
-function avgNav(h){ const u=totUnits(h); const c=h.purchases.reduce((s,p)=>s+(+p.units||0)*(+p.navAtPurchase||0),0); return u>0 ? c/u : null; }
+function avgNav(h){ return positionOf(h).avgCost; }
+function realizedPL(h){ return positionOf(h).realized; }
 
 // XIRR 金額加權年化報酬（二分法求 NPV=0；flows: [{date, amt}]，投入為負、收回為正）
 function xirr(flows){
@@ -1715,41 +1744,49 @@ function holdingPriceMetaHtml(h,date){
 
 function rowData(h){
   const l = latest(h), p = prev(h);
-  const units = totUnits(h), cost = totCost(h), div = totDiv(h);
-  const value = l ? units*l.nav : null;               // 0 股（觀察用）→ 現值 0
-  const pl = (value!=null) ? value+div-cost : null;   // 含息損益（0 股且成本 0 → 損益 0）
+  const pos = positionOf(h), div = totDiv(h);
+  const units = pos.held, cost = pos.basis, realized = pos.realized;
+  const value = l ? units*l.nav : null;                       // 0 股（觀察/已出清）→ 現值 0
+  const unrealized = (value!=null) ? value-cost : null;
+  const pl = (value!=null) ? unrealized+realized+div : null;  // 總損益＝未實現＋已實現＋配息
   return {
     h, name:h.fundName, nav:l?l.nav:null, navDate:l?l.date:null,
     dayChg: (l&&p)? l.nav-p.nav : null, dayChgPct:(l&&p)? (l.nav-p.nav)/p.nav*100 : null,
-    units, cost, div, value, pl, plPct:(pl!=null&&cost>0)? pl/cost*100 : null,
+    units, cost, div, value, pl, unrealized, realized,
+    plPct:(pl!=null && pos.grossInvested>0)? pl/pos.grossInvested*100 : null,   // 以累計投入為分母
     rangePct: rangeReturn(h)
   };
 }
 
-// 單一基金 XIRR（計價幣別；買入為負現金流、配息與目前現值為正）
+// 單一基金 XIRR（計價幣別；買入為負現金流、賣出/配息/目前現值為正）
 function fundXirr(h){
   const flows = [];
   h.purchases.forEach(p=>{ const c=purCost(p); if(c>0) flows.push({date:p.date, amt:-c}); });
+  (h.sells||[]).forEach(s=>{ const pr=(+s.units||0)*(+s.price||0)-(+s.fee||0); if(pr>0) flows.push({date:s.date, amt:pr}); });
   (h.dividends||[]).forEach(d=>{ if(+d.amount>0) flows.push({date:d.date, amt:+d.amount}); });
-  const l = latest(h), u = totUnits(h);
-  if(l && u>0) flows.push({date:todayStr(), amt:u*l.nav});
+  const l = latest(h), pos = positionOf(h);
+  if(l && pos.held>0) flows.push({date:todayStr(), amt:pos.held*l.nav});
   return xirr(flows);
 }
 
 /* ---------------- 渲染：表格/摘要 ---------------- */
 function renderHeader(){
-  let cost=0, value=0, div=0, has=false;
+  let cost=0, value=0, div=0, realized=0, gross=0, has=false;
   const flows = [];
   holdings.forEach(h=>{
     const d = rowData(h), fx = fxOf(h);
-    if(d.cost) { cost += d.cost*fx; has=true; }
+    cost += d.cost*fx;
     if(d.value!=null) value += d.value*fx;
     div += d.div*fx;
+    realized += d.realized*fx;
+    gross += positionOf(h).grossInvested*fx;
     h.purchases.forEach(p=>{ const c=purCost(p)*fx; if(c>0) flows.push({date:p.date, amt:-c}); });
+    (h.sells||[]).forEach(s=>{ const pr=((+s.units||0)*(+s.price||0)-(+s.fee||0))*fx; if(pr>0) flows.push({date:s.date, amt:pr}); });
     (h.dividends||[]).forEach(dv=>{ if(+dv.amount>0) flows.push({date:dv.date, amt:+dv.amount*fx}); });
   });
+  has = gross>0;
   if(value>0) flows.push({date:todayStr(), amt:value});
-  const pl = value+div-cost, pct = cost>0 ? pl/cost*100 : null;
+  const pl = value+div-cost+realized, pct = gross>0 ? pl/gross*100 : null;   // 總損益＝未實現＋已實現＋配息
   $("#sumCost").textContent = has?fmtMoney(cost):"—";
   $("#sumValue").textContent = has?fmtMoney(value):"—";
   $("#sumDiv").textContent = has?fmtMoney(div):"—";
@@ -2000,22 +2037,28 @@ function buildPortfolioSeries(start, end){
   });
   const labels = [...dateSet].sort();
   if(labels.length<2) return null;
-  const valArr = labels.map(()=>0), costArr = labels.map(()=>0), divArr = labels.map(()=>0);
+  const valArr = labels.map(()=>0), costArr = labels.map(()=>0), divArr = labels.map(()=>0), realArr = labels.map(()=>0);
   holdings.forEach(h=>{
     const fx = fxOf(h), hist = getCache(h).navHistory;
     const purAsc = [...h.purchases].sort((a,b)=>a.date.localeCompare(b.date));
+    const sellAsc = [...(h.sells||[])].sort((a,b)=>a.date.localeCompare(b.date));
     const divAsc = [...(h.dividends||[])].sort((a,b)=>a.date.localeCompare(b.date));
-    let hi=0, pi=0, di=0, curNav=null, units=0, cum=0, cumDiv=0;
+    let hi=0, pi=0, si=0, di=0, curNav=null, units=0, basis=0, realCum=0, cumDiv=0;
     labels.forEach((d,i)=>{
       while(hi<hist.length && hist[hi].date<=d){ curNav=hist[hi].nav; hi++; }
-      while(pi<purAsc.length && purAsc[pi].date<=d){ units+=+purAsc[pi].units||0; cum+=purCost(purAsc[pi]); pi++; }
+      while(pi<purAsc.length && purAsc[pi].date<=d){ units+=+purAsc[pi].units||0; basis+=purCost(purAsc[pi]); pi++; }
+      while(si<sellAsc.length && sellAsc[si].date<=d){                       // 賣出：減持有與成本、累計已實現
+        const s=sellAsc[si], u=Math.min(+s.units||0,units), avg=units>0?basis/units:0;
+        const cs=avg*u; realCum += (u*(+s.price||0)-(+s.fee||0))-cs; units-=u; basis-=cs; si++;
+      }
       while(di<divAsc.length && divAsc[di].date<=d){ cumDiv+=+divAsc[di].amount||0; di++; }
       if(curNav!=null && units>0) valArr[i] += units*curNav*fx;
-      costArr[i] += cum*fx;
+      costArr[i] += basis*fx;            // 剩餘投入成本（隨賣出減少）
       divArr[i]  += cumDiv*fx;
+      realArr[i] += realCum*fx;          // 累計已實現損益
     });
   });
-  return {labels, valArr, costArr, divArr};
+  return {labels, valArr, costArr, divArr, realArr};
 }
 
 function trimPortfolioSeries(series){
@@ -2026,7 +2069,8 @@ function trimPortfolioSeries(series){
     labels:series.labels.slice(startIndex),
     valArr:series.valArr.slice(startIndex),
     costArr:series.costArr.slice(startIndex),
-    divArr:series.divArr.slice(startIndex)
+    divArr:series.divArr.slice(startIndex),
+    realArr:(series.realArr||[]).slice(startIndex)
   };
 }
 
@@ -2075,12 +2119,14 @@ function renderPortfolioChart(){
           title: items=>items[0].label,
           label: item=>{
             const i = item.dataIndex;
-            const v = s.valArr[i], c = s.costArr[i], dv = s.divArr[i];
+            const v = s.valArr[i], c = s.costArr[i], dv = s.divArr[i], rz = (s.realArr&&s.realArr[i])||0;
+            const pl = (v-c)+dv+rz;          // 未實現＋配息＋已實現
             return [
               "現值 "+fmtMoney(v),
-              "投入 "+fmtMoney(c),
+              "持有成本 "+fmtMoney(c),
               "配息累計 "+fmtMoney(dv),
-              "含息損益 "+signed(v+dv-c,0)+(c>0?"（"+signed((v+dv-c)/c*100,2,"%")+"）":"")
+              ...(rz?["已實現 "+signed(rz,0)]:[]),
+              "總損益 "+signed(pl,0)
             ];
           }
         }}
@@ -2436,7 +2482,10 @@ function openMng(id){
 }
 function renderPurTable(){
   const h = holdings.find(x=>x.id===mngHoldingId); if(!h) return;
-  const u = totUnits(h), avg = avgNav(h), cost = totCost(h);
+  // 買入表「合計」用累計買入（與下方買入列一致）；持有/已實現另在 #mngXirr 顯示
+  const u = h.purchases.reduce((s,p)=>s+(+p.units||0),0);
+  const cost = h.purchases.reduce((s,p)=>s+purCost(p),0);
+  const avg = u>0 ? h.purchases.reduce((s,p)=>s+(+p.units||0)*(+p.navAtPurchase||0),0)/u : null;
   $("#purBody").innerHTML = h.purchases.map(p=>{
     const amtTxt = (p.amount!=null&&p.amount>0) ? fmtN(+p.amount,0) : fmtN((+p.units||0)*(+p.navAtPurchase||0),0);
     const feeTxt = (+p.fee>0) ? `<br><span class="subTxt">費 ${fmtN(+p.fee,0)}</span>` : "";
@@ -2448,8 +2497,11 @@ function renderPurTable(){
     <td style="max-width:110px;overflow:hidden;text-overflow:ellipsis" title="${esc(p.note)}">${esc(p.note||"")}</td>
     <td class="act"><button data-pedit="${pid}" title="編輯">✏️</button><button data-pdel="${pid}" title="刪除">🗑️</button></td>
   </tr>`;}).join("") + `<tr class="totRow"><td>合計</td><td></td><td>${fmtN(cost,0)}</td><td>${fmtN(u,4)}</td><td>${avg?("均價 "+fmtN(avg, avg>=100?2:4)):"—"}</td><td></td><td></td></tr>`;
-  const r = fundXirr(h);
-  $("#mngXirr").textContent = "年化報酬(XIRR)：" + (r!=null ? signed(r*100,2,"%") : "—") + "　含息損益：" + signed((rowData(h).pl??0),0) + "（" + h.currency + "）";
+  const r = fundXirr(h), rd = rowData(h), pos = positionOf(h), cur = h.currency;
+  let txt = "年化報酬(XIRR)：" + (r!=null ? signed(r*100,2,"%") : "—") + "　總損益：" + signed(rd.pl??0,0) + " " + cur;
+  if(pos.sold>0) txt += `（未實現 ${signed(rd.unrealized??0,0)}／已實現 ${signed(pos.realized,0)}${rd.div?`／配息 ${signed(rd.div,0)}`:""}）`;
+  else if(rd.div) txt += `（含配息 ${signed(rd.div,0)}）`;
+  $("#mngXirr").textContent = txt;
 }
 function renderDivTable(){
   const h = holdings.find(x=>x.id===mngHoldingId); if(!h) return;
@@ -2465,7 +2517,8 @@ function renderSellTable(){
   const h = holdings.find(x=>x.id===mngHoldingId); if(!h) return;
   const sells = h.sells||[];
   const totSold = sells.reduce((s,x)=>s+(+x.units||0),0);
-  $("#sellSum").textContent = sells.length ? `累計賣出 ${fmtN(totSold,4)} ${h.assetType==="stock"?"股":"單位"}` : "";
+  const realized = positionOf(h).realized;
+  $("#sellSum").textContent = sells.length ? `累計賣出 ${fmtN(totSold,4)} ${h.assetType==="stock"?"股":"單位"}　已實現損益 ${signed(realized,0)} ${h.currency}` : "";
   $("#sellBody").innerHTML = sells.length ? sells.map(s=>`<tr>
     <td>${esc(s.date)}</td><td>${fmtN(+s.units,4)}</td><td>${fmtN(+s.price, s.price>=100?2:4)}</td>
     <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis" title="${esc(s.note)}">${esc(s.note||"")}</td>
@@ -3328,7 +3381,7 @@ $("#divBody").onclick = e=>{
   }
 };
 
-/* 賣出記錄（僅記錄與標示，不影響持股/損益） */
+/* 賣出記錄（平均成本法計入損益：扣減持股、計算已實現損益） */
 function openSellEdit(sid){
   editSellId = sid;
   const h = holdings.find(x=>x.id===mngHoldingId);
@@ -3351,6 +3404,11 @@ $("#btnSellSave").onclick = ()=>{
   if(!(units>0)){ toast("賣出股數需大於 0"); return; }
   if(!(priceRaw>0)){ toast("賣出價需大於 0"); return; }
   const price = cleanPrice(priceRaw) || priceRaw;
+  // 賣超提醒：累計賣出（含本筆）超過累計買入時，超出部分不計入損益
+  const grossBought = h.purchases.reduce((s,p)=>s+(+p.units||0),0);
+  const otherSold = (h.sells||[]).filter(s=>s.sellId!==editSellId).reduce((s,x)=>s+(+x.units||0),0);
+  if(otherSold+units > grossBought + 1e-6 &&
+     !confirm(`賣出量（${fmtN(otherSold+units,4)}）超過累計買入（${fmtN(grossBought,4)}），超出部分不計入損益。仍要儲存？`)) return;
   const obj = {date:$("#eSellDate").value||todayStr(), units, price, fee:(fee>0?fee:0), note:$("#eSellNote").value.trim()};
   h.sells = h.sells||[];
   if(editSellId){ Object.assign(h.sells.find(x=>x.sellId===editSellId), obj); }
@@ -3359,7 +3417,7 @@ $("#btnSellSave").onclick = ()=>{
   lsSet(LS_H,holdings);
   $("#sellEdit").hidden=true; editSellId=null;
   renderSellTable(); renderAll();
-  toast("已記錄賣出（不影響持股與損益）");
+  toast(`已記錄賣出 · 已實現損益 ${signed(positionOf(h).realized,0)} ${h.currency}`);
 };
 $("#sellBody").onclick = e=>{
   const ed = e.target.closest("button[data-sedit]"), dl = e.target.closest("button[data-sdel]");
