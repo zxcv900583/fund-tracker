@@ -126,6 +126,14 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
 .totRow{font-weight:700}
 .badge{font-size:10px;border-radius:4px;padding:1px 5px;color:#fff;display:inline-block}
 .badge.RSP{background:var(--rsp)} .badge.LUMP{background:var(--lump)} .badge.FUND{background:#7c3aed}
+.badge.WATCH{background:var(--lump)} .badge.CLOSED{background:var(--muted)}
+/* 隱私模式：碼住金額（純視覺，不改數值） */
+.priv-blur{filter:blur(7px);transition:filter .15s;cursor:default}
+body[data-private="true"] .summary .val,
+body[data-private="true"] #statusBar b,
+body[data-private="true"] #tbody td.amt,
+body[data-private="true"] #mngXirr,
+body[data-private="true"] #purBody tr.totRow td{filter:blur(7px);transition:filter .15s;cursor:default}
 .note{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.5}
 #toast{position:fixed;bottom:46px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:8px 18px;border-radius:20px;font-size:13px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:99;max-width:90vw}
 #toast.show{opacity:.93}
@@ -216,6 +224,7 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
       <button class="btn" id="btnImport" title="匯入 JSON">匯入</button>
       <button class="btn" id="btnCsv" title="從 CSV 批次匯入買入/配息記錄">CSV</button>
       <button class="btn" id="btnColorSwap" type="button" title="將上漲與下跌顏色對調" aria-pressed="false"><span class="color-swap-icon"><span class="pos">漲</span><span class="neg">跌</span></span>色</button>
+      <button class="btn" id="btnPrivacy" type="button" title="碼住金額（方便截圖分享）" aria-pressed="false">🔒 隱私</button>
       <button class="btn" id="btnTheme" title="切換主題">🌓</button>
     </div>
   </div>
@@ -266,6 +275,7 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
     <span class="spacer" style="flex:1"></span>
     <button class="tab" id="btnPortfolio" title="整體投資組合走勢">📊 組合</button>
     <button class="tab" id="btnCompareView" title="比較多檔資產與市場（重疊折線）">⚖ 比較</button>
+    <button class="tab" id="btnAlloc" title="資產配置圓餅圖">🥧 配置</button>
     <button class="tab" id="modeToggle" title="切換 % / 淨值">%</button>
   </div>
   <div id="comparePanel" hidden>
@@ -498,6 +508,15 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
   </div>
 </dialog>
 
+<!-- ===== 資產配置圓餅圖 Dialog（唯讀） ===== -->
+<dialog id="dlgAlloc" style="width:min(560px,94vw);max-width:94vw">
+  <div class="dlgHead"><span>資產配置（依現值 TWD）</span><button class="xBtn" data-close="dlgAlloc">✕</button></div>
+  <div class="dlgBody">
+    <div id="allocHint" class="subTxt" hidden style="text-align:center;padding:24px 0">尚無持倉現值可顯示（請先加入有持有股數的資產）</div>
+    <div style="position:relative;height:360px"><canvas id="allocCanvas"></canvas></div>
+  </div>
+</dialog>
+
 <!-- ===== 交易明細 Dialog（點圖上 B/S 標記） ===== -->
 <dialog id="dlgTxn">
   <div class="dlgHead"><span id="txnDetailTitle">交易明細</span><button class="xBtn" data-close="dlgTxn">✕</button></div>
@@ -603,6 +622,16 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
          renderHeader 把賣出 proceeds 計入現金流；組合圖隨賣出日減少持有與成本、
          tooltip 計入已實現；管理彈窗顯示未實現/已實現拆分、賣出表顯示累計已實現；
          賣超持有量會提示（超出部分不計）。買入表「合計」維持累計買入（與列一致）。
+   v1.19 三項純新增低風險功能：①B3 觀察持倉標示——表格資產名稱欄依 positionOf
+         加徽章：純追蹤(0 股、未投入)標「觀察」、曾持有已全賣標「已出清」。
+         ②N9 隱私模式——header 加「🔒 隱私」鈕(仿漲跌色對調)，一鍵碼住金額方便
+         截圖分享，settings.privacyMode 持久化、applyPrivacy 設 body[data-private]，
+         CSS 對摘要/狀態列/表格金額欄(td.amt)/管理彈窗 XIRR 與合計列加 blur(7px)，
+         純視覺不改任何數值或計算。③N1 資產配置圓餅圖——chartBar 加「🥧 配置」鈕
+         開獨立唯讀彈窗(#dlgAlloc)，以各持倉現值(rowData.value×fxOf 轉 TWD、僅取
+         value>0)畫 doughnut，tooltip 顯示金額與占比%，固定 10 色調色盤循環；
+         完全獨立於主圖(不動 chartView/selectedId)，建立前先 destroy 舊實例、
+         關閉彈窗時 destroy 釋放；無持倉時顯示提示不崩。
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
@@ -682,7 +711,7 @@ function normalizeHoldings(){
 normalizeHoldings();
 let settings = Object.assign({
   defaultChartRange:"3M", currency:"TWD", refreshOnOpen:true, theme:"light",
-  swapGainLossColors:false
+  swapGainLossColors:false, privacyMode:false
 }, lsGet(LS_S, {}));
 let fxCache  = lsGet(LS_FX, {});   // {USD:{rate,date}, ...} → TWD
 let navMem   = {};                 // 記憶體中的 nav cache
@@ -692,6 +721,7 @@ let customRange = null;            // {start,end}
 let chartMode = "pct";             // pct | nav
 let sortKey = null, sortAsc = true;
 let chart = null;                  // 主圖（基金/股票、組合、比較共用同一個 canvas）
+let allocChart = null;             // 資產配置圓餅圖（獨立彈窗，與主圖無關）
 let marketCache = lsGet(LS_MARKET_CACHE, {quotes:{}, fetchedAt:null});
 let fundUpdateStatus = "";
 let marketUpdateStatus = "";
@@ -1823,16 +1853,20 @@ function renderTable(){
     const assetBadge = d.h.assetType==="stock"
       ? '<span class="badge LUMP">股票</span> '
       : '<span class="badge FUND">基金</span> ';
+    const pos = positionOf(d.h);
+    const posBadge = (pos.held===0 && pos.grossInvested===0) ? '<span class="badge WATCH">觀察</span> '
+      : (pos.held===0 && pos.grossInvested>0) ? '<span class="badge CLOSED">已出清</span> '
+      : '';
     const hid = esc(d.h.id);
     return `<tr data-id="${hid}"${sel}>
-      <td title="${esc(d.h.fundName)}">${assetBadge}${esc(d.h.fundName)}<br><span class="subTxt">${esc(d.h.currency)}${d.h.assetType==="stock"&&d.h.symbol?" · "+esc(d.h.symbol):(d.h.isin?" · "+esc(d.h.isin):"")}</span></td>
+      <td title="${esc(d.h.fundName)}">${assetBadge}${posBadge}${esc(d.h.fundName)}<br><span class="subTxt">${esc(d.h.currency)}${d.h.assetType==="stock"&&d.h.symbol?" · "+esc(d.h.symbol):(d.h.isin?" · "+esc(d.h.isin):"")}</span></td>
       <td><span class="current-price">${fmtN(d.nav, d.nav!=null&&d.nav>=100?2:4)}</span>${holdingPriceMetaHtml(d.h,d.navDate)}</td>
       <td>${dayTxt}</td>
       <td class="unitsCell" title="點擊管理買入記錄">${fmtN(d.units,2)}</td>
-      <td>${fmtN(d.cost,0)}</td>
-      <td>${fmtN(d.value,0)}</td>
-      <td class="${clsOf(d.pl??0)}">${d.pl!=null?signed(d.pl,0):"—"}</td>
-      <td>${d.div>0?fmtN(d.div,0):"—"}</td>
+      <td class="amt">${fmtN(d.cost,0)}</td>
+      <td class="amt">${fmtN(d.value,0)}</td>
+      <td class="amt ${clsOf(d.pl??0)}">${d.pl!=null?signed(d.pl,0):"—"}</td>
+      <td class="amt">${d.div>0?fmtN(d.div,0):"—"}</td>
       <td class="${clsOf(d.plPct??0)}">${d.plPct!=null?signed(d.plPct,2,"%"):"—"}</td>
       <td class="${clsOf(d.rangePct??0)}">${d.rangePct!=null?signed(d.rangePct,2,"%"):"—"}</td>
       <td class="operation-cell"><span class="rowBtns">
@@ -1955,6 +1989,15 @@ function applyGainLossColors(){
   button?.setAttribute("aria-pressed",String(swapped));
   button?.classList.toggle("toggle-on",swapped);
   if(button) button.title = swapped ? "恢復原本的上漲與下跌顏色" : "將上漲與下跌顏色對調";
+}
+
+function applyPrivacy(){
+  const on = settings.privacyMode===true;
+  document.body.dataset.private = String(on);
+  const button = $("#btnPrivacy");
+  button?.setAttribute("aria-pressed",String(on));
+  button?.classList.toggle("toggle-on",on);
+  if(button) button.title = on ? "顯示金額" : "碼住金額（方便截圖分享）";
 }
 
 const markerPlugin = {
@@ -3153,6 +3196,12 @@ $("#btnColorSwap").onclick = ()=>{
   renderChart();
   toast(settings.swapGainLossColors ? "已對調漲跌顏色" : "已恢復原本漲跌顏色");
 };
+$("#btnPrivacy").onclick = ()=>{
+  settings.privacyMode = !settings.privacyMode;
+  applyPrivacy();
+  lsSet(LS_S,settings);
+  toast(settings.privacyMode ? "已碼住金額" : "已顯示金額");
+};
 $("#btnCsvPick").onclick = ()=>$("#csvFile").click();
 $("#btnCsvTpl").onclick = downloadCsvTemplate;
 $("#btnCsvExport").onclick = frExportCsv;
@@ -3315,6 +3364,45 @@ $("#modeToggle").onclick = ()=>{
   $("#modeToggle").classList.toggle("on", chartMode==="nav");
   renderChart();
 };
+/* 資產配置圓餅圖（唯讀、獨立彈窗；完全不動主圖 chartView/selectedId） */
+const ALLOC_PALETTE = ["#2563eb","#16a34a","#f59e0b","#dc2626","#7c3aed","#0891b2","#db2777","#65a30d","#ea580c","#0d9488"];
+function openAlloc(){
+  const items = holdings.map(h=>{
+    const d = rowData(h);
+    const valTwd = (d.value!=null) ? d.value*fxOf(h) : 0;
+    return {name:h.fundName, value:valTwd};
+  }).filter(x=>x.value>0).sort((a,b)=>b.value-a.value);
+  if(allocChart){ allocChart.destroy(); allocChart = null; }
+  const hint = $("#allocHint"), canvas = $("#allocCanvas");
+  if(!items.length){
+    hint.hidden = false; canvas.style.display = "none";
+    $("#dlgAlloc").showModal();
+    return;
+  }
+  hint.hidden = true; canvas.style.display = "";
+  const total = items.reduce((s,x)=>s+x.value,0);
+  const colors = items.map((_,i)=>ALLOC_PALETTE[i%ALLOC_PALETTE.length]);
+  $("#dlgAlloc").showModal();
+  allocChart = new Chart(canvas.getContext("2d"), {
+    type:"doughnut",
+    data:{
+      labels: items.map(x=>x.name),
+      datasets:[{ data: items.map(x=>x.value), backgroundColor: colors, borderWidth:1, borderColor:getComputedStyle(document.body).getPropertyValue("--panel").trim() }]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{
+        markers:false,
+        legend:{ position:"bottom", labels:{ color:getComputedStyle(document.body).getPropertyValue("--text").trim(), boxWidth:12, font:{size:12} } },
+        tooltip:{ callbacks:{ label:(ctx)=>{
+          const v = ctx.parsed||0, pct = total>0 ? (v/total*100) : 0;
+          return ` ${ctx.label}：${fmtMoney(v)}（${pct.toFixed(1)}%）`;
+        } } }
+      }
+    }
+  });
+}
+
 $("#btnPortfolio").onclick = ()=>{
   chartView = chartView==="portfolio" ? "fund" : "portfolio";
   renderTabs(); renderChart();
@@ -3323,6 +3411,7 @@ $("#btnCompareView").onclick = ()=>{
   if(chartView==="compare"){ chartView = "fund"; renderTabs(); renderChart(); }
   else enterCompareView();
 };
+$("#btnAlloc").onclick = openAlloc;
 $("#btnAddPur").onclick = ()=>openPurEdit(null);
 $("#btnPurCancel").onclick = ()=>{ $("#purEdit").hidden=true; editPurId=null; };
 $("#btnPurSave").onclick = savePur;
@@ -3480,6 +3569,7 @@ $("#purBody").onclick = e=>{
   }
 };
 document.querySelectorAll("[data-close]").forEach(b=>{ b.onclick = ()=>document.getElementById(b.dataset.close).close(); });
+$("#dlgAlloc").addEventListener("close", ()=>{ if(allocChart){ allocChart.destroy(); allocChart = null; } });
 window.addEventListener("resize", ()=>{ if(chart) chart.resize(); });
 
 /* ---------------- PWA ---------------- */
@@ -3504,6 +3594,7 @@ window.addEventListener("resize", ()=>{ if(chart) chart.resize(); });
 (function init(){
   document.body.dataset.theme = settings.theme||"light";
   applyGainLossColors();
+  applyPrivacy();
   compareFundIds = compareFundIds.filter(id=>holdings.some(h=>h.id===id)).slice(0,MAX_COMPARE);
   marketSelection = marketSelection.filter(symbol=>MARKET_INDICES.some(item=>item.symbol===symbol)).slice(0,MAX_COMPARE);
   while(compareSelectionCount()>MAX_COMPARE) marketSelection.pop();

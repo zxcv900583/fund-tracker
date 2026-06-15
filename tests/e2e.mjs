@@ -638,6 +638,85 @@ async function run() {
   await cdp.evaluate(`document.querySelector("#dlgMng").close()`);
   console.log("[e2e] stock management passed");
 
+  // N9 隱私模式：一鍵碼住金額（純視覺、不改數值），可開可關、設定持久化
+  const privacy = await cdp.evaluate(`(async()=>{
+    const btn=document.querySelector("#btnPrivacy");
+    btn.click(); await new Promise(r=>setTimeout(r,50));
+    const valEl=document.querySelector(".summary .val");
+    const on={
+      dataPrivate:document.body.dataset.private,
+      aria:btn.getAttribute("aria-pressed"),
+      ls:JSON.parse(localStorage.getItem("fund_tracker_settings")).privacyMode,
+      valFilter:getComputedStyle(valEl).filter
+    };
+    btn.click(); await new Promise(r=>setTimeout(r,50));
+    const off={
+      dataPrivate:document.body.dataset.private,
+      ls:JSON.parse(localStorage.getItem("fund_tracker_settings")).privacyMode,
+      valFilter:getComputedStyle(valEl).filter
+    };
+    return {on, off};
+  })()`);
+  assert.equal(privacy.on.dataPrivate, "true", "隱私開啟後 body[data-private] 應為 true");
+  assert.equal(privacy.on.aria, "true", "隱私按鈕 aria-pressed 應為 true");
+  assert.equal(privacy.on.ls, true, "隱私模式應寫入 settings");
+  assert.ok(privacy.on.valFilter.includes("blur"), "隱私開啟後摘要金額應有 blur 濾鏡：" + privacy.on.valFilter);
+  assert.equal(privacy.off.dataPrivate, "false", "再次點擊應關閉隱私模式");
+  assert.equal(privacy.off.ls, false, "關閉後 settings 應為 false");
+  assert.ok(!privacy.off.valFilter.includes("blur"), "關閉後金額不應再有 blur");
+  console.log("[e2e] privacy mode passed:", JSON.stringify(privacy));
+
+  // N1 資產配置圓餅圖：唯讀彈窗、doughnut、labels 數 = value>0 持倉數；獨立於主圖
+  const alloc = await cdp.evaluate(`(async()=>{
+    const expected = holdings.filter(h=>{ const d=rowData(h); return d.value!=null && d.value*fxOf(h)>0; }).length;
+    const viewBefore=chartView, selBefore=selectedId;
+    document.querySelector("#btnAlloc").click();
+    await new Promise(r=>setTimeout(r,100));
+    const dlg=document.querySelector("#dlgAlloc");
+    const ch=Chart.getChart(document.querySelector("#allocCanvas"));
+    const res={
+      open:dlg.open, exists:!!ch, type:ch?ch.config.type:null,
+      labelCount:ch?ch.data.labels.length:0, expected,
+      markersOff:ch?ch.options.plugins.markers:null,
+      viewUnchanged:chartView===viewBefore, selUnchanged:selectedId===selBefore
+    };
+    dlg.close();
+    await new Promise(r=>setTimeout(r,80));
+    res.destroyedAfterClose=!Chart.getChart(document.querySelector("#allocCanvas"));
+    return res;
+  })()`);
+  assert.ok(alloc.open, "點擊配置應開啟 #dlgAlloc");
+  assert.ok(alloc.exists, "應建立 alloc doughnut chart 實例");
+  assert.equal(alloc.type, "doughnut", "配置圖應為 doughnut");
+  assert.equal(alloc.labelCount, alloc.expected, "圓餅 labels 數應等於 value>0 的持倉數");
+  assert.equal(alloc.markersOff, false, "配置圖應設 plugins.markers=false");
+  assert.ok(alloc.viewUnchanged, "配置圖不應改動主圖 chartView");
+  assert.ok(alloc.selUnchanged, "配置圖不應改動 selectedId");
+  assert.ok(alloc.destroyedAfterClose, "關閉配置彈窗應 destroy chart 釋放");
+  console.log("[e2e] allocation doughnut passed:", JSON.stringify(alloc));
+
+  // B3 觀察徽章：臨時新增一個 0 股 holding → 列上應有「觀察」徽章；驗證後移除還原
+  const watchBadge = await cdp.evaluate(`(async()=>{
+    const countBefore=holdings.length;
+    holdings.push({id:"e2e_watch", assetType:"fund", fundCode:"E2EWATCH", fundName:"E2E觀察用", currency:"TWD", isin:"", dividends:[], rspPlans:[], purchases:[], sells:[]});
+    renderAll(); await new Promise(r=>setTimeout(r,80));
+    const tr=[...document.querySelectorAll('#tbody tr[data-id="e2e_watch"]')][0];
+    const hasWatch=!!tr && tr.querySelector("td").textContent.includes("觀察");
+    const badge=tr?tr.querySelector(".badge.WATCH"):null;
+    // 還原
+    const idx=holdings.findIndex(h=>h.id==="e2e_watch");
+    if(idx>=0) holdings.splice(idx,1);
+    renderAll(); await new Promise(r=>setTimeout(r,80));
+    const countAfter=holdings.length;
+    const gone=!document.querySelector('#tbody tr[data-id="e2e_watch"]');
+    return {hasWatch, badgeText:badge?badge.textContent:null, countBefore, countAfter, gone};
+  })()`);
+  assert.ok(watchBadge.hasWatch, "0 股持倉列應顯示「觀察」徽章");
+  assert.equal(watchBadge.badgeText, "觀察", "徽章文字應為「觀察」");
+  assert.equal(watchBadge.countAfter, watchBadge.countBefore, "驗證後 holdings 數應還原");
+  assert.ok(watchBadge.gone, "移除後該列應消失（不影響後續斷言）");
+  console.log("[e2e] watch badge passed:", JSON.stringify(watchBadge));
+
   // 買賣標記：圖上標 B/S、點 S 看明細；賣出以平均成本法扣減持股、計入已實現損益
   await cdp.evaluate(`[...document.querySelectorAll("#tbody tr[data-id]")].find(tr=>tr.textContent.includes("2330.TW")).click()`);
   await waitForPage(cdp, `chartView==="fund" && chart?.data?.datasets?.length===1 && (chart.options.plugins?.markers?.meta?.labels||[]).length>20`, 30000);

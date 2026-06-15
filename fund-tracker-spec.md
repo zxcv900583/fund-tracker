@@ -1,10 +1,16 @@
 # 基金追蹤分析軟體 — 產品規格書
 
-**版本：** v1.18（前端）／Worker v8<br>
-**日期：** 2026-06-14（v1.1：2026-06-11；v1.0：2026-06-10）<br>
+**版本：** v1.19（前端）／Worker v8<br>
+**日期：** 2026-06-16（v1.1：2026-06-11；v1.0：2026-06-10）<br>
 **作者：** Chan
 
 ---
+
+## v1.19 更新摘要（2026-06-16）— 觀察徽章 + 隱私模式 + 資產配置圓餅圖（三項純新增、低風險）
+
+- **B3 觀察持倉標示**：表格資產名稱欄依 `positionOf(d.h)` 加狀態徽章——`held===0 && grossInvested===0`（純追蹤、未投入）標「**觀察**」（中性藍 `--lump`）；`held===0 && grossInvested>0`（曾持有、已全賣）標「**已出清**」（灰 `--muted`）；其餘持有中不加。放在既有股票/基金徽章之後，純顯示不影響任何計算。
+- **N9 隱私模式**：header 工具列新增「🔒 隱私」按鈕（完整仿照「漲跌色對調」模式）。`settings.privacyMode` 持久化於 localStorage，`applyPrivacy()` 設 `body[data-private]` 與按鈕 `aria-pressed`/`toggle-on`，初始化一併套用。CSS 用 `blur(7px)` 對摘要列 6 個值、狀態列 `#statusBar b`、表格四個金額欄（新增 `td.amt`：持有成本/現值/損益/配息）、管理彈窗 `#mngXirr` 與買入表合計列加模糊，方便截圖分享。**純視覺，不改任何數值或計算。**
+- **N1 資產配置圓餅圖**：chartBar 新增「🥧 配置」按鈕，開獨立唯讀彈窗 `#dlgAlloc`。以各持倉現值（`rowData(h).value × fxOf(h)` 轉 TWD、僅取 `value>0`）畫 Chart.js doughnut，label 為持倉名稱、tooltip 顯示金額與占比%，固定 10 色調色盤循環。**完全獨立於主圖（不動 `chartView`/`selectedId`）**，建立前先 destroy 舊 `allocChart`、關閉彈窗時 destroy 釋放；無 `value>0` 持倉時顯示提示文字、隱藏 canvas 不繪圖。建圖設 `options.plugins.markers=false`、`responsive:true`、`maintainAspectRatio:false`。
 
 ## v1.18 更新摘要（2026-06-14）— 賣出計入損益（平均成本法 / 已實現）
 
