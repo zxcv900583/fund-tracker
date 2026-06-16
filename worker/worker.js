@@ -7,6 +7,7 @@ const YAHOO_SEARCH_BASES = [
   { url: "https://query2.finance.yahoo.com/v1/finance/search", name: "yahoo-search-query2" },
 ];
 const TWSE_INDEX_URL = "https://openapi.twse.com.tw/v1/exchangeReport/MI_INDEX";
+const TWSE_REALTIME_INDEX_URL = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_t00.tw&json=1&delay=0";
 const TWSE_HISTORY_URL = "https://openapi.twse.com.tw/v1/exchangeReport/MI_5MINS_HIST";
 const TWSE_STOCK_DAILY_URL = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL";
 const MORNINGSTAR_BASE = "https://lt.morningstar.com/api/rest.svc";
@@ -25,6 +26,15 @@ const ALLOWED_RANGES = new Set([
 const ALLOWED_INTERVALS = new Set(["1d", "1wk", "1mo"]);
 const TWSE_FALLBACK_RANGES = new Set(["1d", "5d", "1mo"]);
 const KV_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+const INDEX_TIME_ZONES = Object.freeze({
+  "^TWII": "Asia/Taipei",
+  "^GSPC": "America/New_York",
+  "^IXIC": "America/New_York",
+  "^DJI": "America/New_York",
+  "^N225": "Asia/Tokyo",
+  "^HSI": "Asia/Hong_Kong",
+});
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -357,8 +367,17 @@ async function resolveQuote(symbol, env) {
 
   try {
     const yahoo = await fetchYahooWithFallback(symbol, "5d", "1d", 300, attempts);
-    const quote = normalizeQuote(symbol, yahoo.payload);
-    const value = { ...quote, source: yahoo.source, stale: false, attempts };
+    let quote = normalizeQuote(symbol, yahoo.payload);
+    let source = yahoo.source;
+    if (symbol === "^TWII") {
+      try {
+        quote = mergeTwseRealtimeQuote(quote, await fetchTwseRealtimeQuote());
+        source = "twse";
+      } catch (error) {
+        attempts.push(`twse-realtime: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    const value = { ...quote, source, stale: false, attempts };
     await putCache(env, quoteCacheKey(symbol), value, quoteSignature(quote));
     return value;
   } catch (error) {
@@ -366,6 +385,15 @@ async function resolveQuote(symbol, env) {
   }
 
   if (symbol === "^TWII") {
+    try {
+      const quote = await fetchTwseRealtimeQuote();
+      const value = { ...quote, source: "twse", stale: false, attempts };
+      await putCache(env, quoteCacheKey(symbol), value, quoteSignature(quote));
+      return value;
+    } catch (error) {
+      attempts.push(`twse-realtime: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
     try {
       const quote = await fetchTwseQuote();
       const value = { ...quote, source: "twse", stale: false, attempts };
@@ -671,6 +699,75 @@ async function fetchYahooFromBase(base, symbol, range, interval, cacheTtl, fresh
   return { payload, source: base.name };
 }
 
+async function fetchTwseRealtimeQuote() {
+  const response = await fetch(TWSE_REALTIME_INDEX_URL, {
+    headers: {
+      "Accept": "application/json,text/plain,*/*",
+      "Referer": "https://www.twse.com.tw/",
+      "User-Agent": "Mozilla/5.0 (compatible; FundTrackerMarketAPI/7.0)",
+    },
+    cf: { cacheEverything: true, cacheTtl: 5 },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+  return normalizeTwseRealtimeQuote(await response.json());
+}
+
+function normalizeTwseRealtimeQuote(payload) {
+  const row = payload?.msgArray?.find((item) => item?.ch === "t00.tw" || item?.c === "t00");
+  const price = parseNumber(row?.z);
+  const previousClose = parseNumber(row?.y);
+  const marketTime = twseDateTimeToUnix(String(row?.d || row?.["^"] || ""), String(row?.t || row?.["%"] || ""));
+
+  if (!row || !Number.isFinite(price) || !Number.isFinite(previousClose) || !Number.isFinite(marketTime)) {
+    throw new Error("TWSE realtime index returned invalid values");
+  }
+
+  const session = twseSessionFromDate(String(row.d || row["^"] || ""));
+  return {
+    symbol: "^TWII",
+    price,
+    previousClose,
+    previousCloseSource: "twse-realtime",
+    currency: "TWD",
+    exchange: "TWSE",
+    marketTime,
+    session,
+    open: parseNumber(row.o),
+    dayHigh: parseNumber(row.h),
+    dayLow: parseNumber(row.l),
+  };
+}
+
+function mergeTwseRealtimeQuote(yahooQuote, twseQuote) {
+  const previousCloseOriginal = Number.isFinite(yahooQuote.previousClose)
+    ? yahooQuote.previousClose
+    : null;
+
+  const merged = {
+    ...yahooQuote,
+    price: twseQuote.price,
+    previousClose: twseQuote.previousClose,
+    previousCloseSource: "twse-realtime",
+    currency: twseQuote.currency,
+    exchange: twseQuote.exchange,
+    marketTime: twseQuote.marketTime || yahooQuote.marketTime,
+    session: twseQuote.session || yahooQuote.session,
+    open: twseQuote.open,
+    dayHigh: twseQuote.dayHigh,
+    dayLow: twseQuote.dayLow,
+    previousCloseMarketDate: marketDateFromUnix(twseQuote.marketTime, "Asia/Taipei"),
+  };
+
+  if (Number.isFinite(previousCloseOriginal) && previousCloseOriginal !== twseQuote.previousClose) {
+    merged.previousCloseOriginal = previousCloseOriginal;
+  } else {
+    delete merged.previousCloseOriginal;
+  }
+
+  return merged;
+}
+
 async function fetchTwseQuote() {
   const response = await fetch(TWSE_INDEX_URL, {
     headers: {
@@ -865,8 +962,97 @@ function upstreamJsonHeaders() {
   };
 }
 
-// 盤中以 meta 即時報價、收盤後退回 K 線陣列；前收一律用 meta.previousClose 或 K 線前一日，
-// 不使用 chartPreviousClose（除息/股利調整會使其與當日漲跌計算不一致）
+function indexTimeZone(symbol) {
+  return INDEX_TIME_ZONES[symbol] || null;
+}
+
+function marketDateFromUnix(timestamp, timeZone) {
+  if (!Number.isFinite(timestamp) || !timeZone) return null;
+
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(timestamp * 1000));
+
+  const values = Object.fromEntries(
+    parts
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  );
+
+  if (!values.year || !values.month || !values.day) return null;
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function alignedPreviousCloseFromDailyKLine(symbol, payload, quoteMarketTime) {
+  const timeZone = indexTimeZone(symbol);
+  if (!timeZone) return null;
+
+  const result = payload?.chart?.result?.[0];
+  const closes = result?.indicators?.quote?.[0]?.close || [];
+  const timestamps = result?.timestamp || [];
+  const points = timestamps
+    .map((timestamp, index) => ({
+      close: closes[index],
+      timestamp,
+      marketDate: marketDateFromUnix(timestamp, timeZone),
+    }))
+    .filter((point) => Number.isFinite(point.timestamp) && point.marketDate);
+
+  if (points.length < 2) return null;
+
+  const quoteMarketDate = marketDateFromUnix(quoteMarketTime, timeZone);
+  const lastPoint = points.at(-1);
+  const prevPoint = points.at(-2);
+
+  // Yahoo sometimes returns a daily timestamp for the previous trading day but
+  // leaves its OHLC values null.  Do not skip across that null candle: doing so
+  // would use an older close (for example Friday instead of Monday) and inflate
+  // the displayed percent change.  The immediate previous daily candle must be
+  // present and finite before it can become previousClose.
+  if (
+    !quoteMarketDate ||
+    quoteMarketDate !== lastPoint.marketDate ||
+    !Number.isFinite(lastPoint.close) ||
+    !Number.isFinite(prevPoint.close)
+  ) {
+    return null;
+  }
+
+  return {
+    previousClose: prevPoint.close,
+    marketDate: quoteMarketDate,
+  };
+}
+
+function previousCloseFromAlignedDailyKLine(symbol, payload, quoteMarketTime) {
+  return alignedPreviousCloseFromDailyKLine(symbol, payload, quoteMarketTime)?.previousClose ?? null;
+}
+
+function immediatePreviousKLineClose(symbol, payload) {
+  const timeZone = indexTimeZone(symbol);
+  if (!timeZone) return null;
+
+  const result = payload?.chart?.result?.[0];
+  const closes = result?.indicators?.quote?.[0]?.close || [];
+  const timestamps = result?.timestamp || [];
+  const points = timestamps
+    .map((timestamp, index) => ({
+      close: closes[index],
+      timestamp,
+      marketDate: marketDateFromUnix(timestamp, timeZone),
+    }))
+    .filter((point) => Number.isFinite(point.timestamp) && point.marketDate);
+  const prevPoint = points.at(-2);
+  return Number.isFinite(prevPoint?.close) ? prevPoint.close : null;
+}
+
+// 盤中以 meta 即時報價、收盤後退回 K 線陣列；前收不再無條件相信 meta.previousClose。
+// 對容易發生日線與 quote meta 交易日錯位的主要指數，先用交易所時區確認 quote marketTime
+// 與最後一根有效日 K 為同一交易日；只有對齊時才用倒數第二根有效日 K close 當前收。
+// 仍不使用 chartPreviousClose（除息/股利調整會使其與當日漲跌計算不一致）。
 function normalizeQuote(symbol, payload) {
   const result = payload?.chart?.result?.[0];
   if (!result?.meta) {
@@ -888,17 +1074,32 @@ function normalizeQuote(symbol, payload) {
   const metaTime = meta.regularMarketTime || 0;
 
   let finalPrice, finalTime, finalPrevClose;
+  let previousCloseSource = null;
+  let previousCloseMarketDate = null;
+  const previousCloseOriginal = Number.isFinite(meta.previousClose) ? meta.previousClose : null;
 
   if (Number.isFinite(metaPrice) && metaTime >= lastKLine.timestamp) {
     // 盤中：使用最新的 meta 報價
     finalPrice = metaPrice;
     finalTime = metaTime;
-    finalPrevClose = meta.previousClose ?? prevKLine.value;
+    const alignedPrevClose = alignedPreviousCloseFromDailyKLine(symbol, payload, finalTime);
+    if (Number.isFinite(alignedPrevClose?.previousClose)) {
+      finalPrevClose = alignedPrevClose.previousClose;
+      previousCloseSource = "daily-kline-aligned";
+      previousCloseMarketDate = alignedPrevClose.marketDate;
+    } else {
+      const guardedKLinePreviousClose = indexTimeZone(symbol)
+        ? immediatePreviousKLineClose(symbol, payload)
+        : prevKLine.value;
+      finalPrevClose = meta.previousClose ?? guardedKLinePreviousClose;
+      previousCloseSource = Number.isFinite(meta.previousClose) ? "yahoo-meta" : "daily-kline";
+    }
   } else if (Number.isFinite(lastKLine.value)) {
     // 收盤後或 meta 延遲：退回最穩定的 K 線陣列
     finalPrice = lastKLine.value;
     finalTime = lastKLine.timestamp;
     finalPrevClose = prevKLine.value;
+    previousCloseSource = "daily-kline";
   } else {
     throw new Error("No valid price found");
   }
@@ -909,15 +1110,25 @@ function normalizeQuote(symbol, payload) {
     ? { start: tp.start, end: tp.end }
     : null;
 
-  return {
+  const quote = {
     symbol,
     price: finalPrice,
     previousClose: Number.isFinite(finalPrevClose) ? finalPrevClose : null,
+    previousCloseSource,
     currency: meta.currency || null,
     exchange: meta.exchangeName || null,
     marketTime: finalTime || null,
     session,
   };
+
+  if (previousCloseSource === "daily-kline-aligned" && Number.isFinite(previousCloseOriginal)) {
+    quote.previousCloseOriginal = previousCloseOriginal;
+  }
+  if (previousCloseMarketDate) {
+    quote.previousCloseMarketDate = previousCloseMarketDate;
+  }
+
+  return quote;
 }
 
 function rocDateToUnix(value) {
@@ -926,6 +1137,25 @@ function rocDateToUnix(value) {
   const month = Number(value.slice(3, 5));
   const day = Number(value.slice(5, 7));
   return Math.floor(Date.UTC(year, month - 1, day, 5, 30) / 1000);
+}
+
+function twseDateTimeToUnix(dateValue, timeValue) {
+  if (!/^\d{8}$/.test(dateValue) || !/^\d{2}:\d{2}:\d{2}$/.test(timeValue)) return null;
+  const year = Number(dateValue.slice(0, 4));
+  const month = Number(dateValue.slice(4, 6));
+  const day = Number(dateValue.slice(6, 8));
+  const [hour, minute, second] = timeValue.split(":").map(Number);
+  if (![year, month, day, hour, minute, second].every(Number.isFinite)) return null;
+
+  // Taiwan Stock Exchange timestamps are local Asia/Taipei wall time.  Taiwan
+  // has no DST, so subtracting eight hours converts the exchange clock to UTC.
+  return Math.floor(Date.UTC(year, month - 1, day, hour - 8, minute, second) / 1000);
+}
+
+function twseSessionFromDate(dateValue) {
+  const start = twseDateTimeToUnix(dateValue, "09:00:00");
+  const end = twseDateTimeToUnix(dateValue, "13:30:00");
+  return Number.isFinite(start) && Number.isFinite(end) ? { start, end } : null;
 }
 
 function parseNumber(value) {
@@ -938,7 +1168,7 @@ function chartCacheTtl(range) {
 }
 
 function quoteCacheKey(symbol) {
-  return `quote:v4:${symbol}`;
+  return `quote:v5:${symbol}`;
 }
 
 function chartCacheKey(symbol, range, interval) {
@@ -968,7 +1198,16 @@ async function putCache(env, key, value, signature = null) {
 }
 
 function quoteSignature(quote) {
-  return `q:${quote.price}|${quote.previousClose}|${quote.marketTime}|${quote.session?.start ?? ""}`;
+  return [
+    "q",
+    quote.price,
+    quote.previousClose,
+    quote.previousCloseSource ?? "",
+    quote.previousCloseOriginal ?? "",
+    quote.previousCloseMarketDate ?? "",
+    quote.marketTime,
+    quote.session?.start ?? "",
+  ].join("|");
 }
 
 async function getCache(env, key) {
@@ -1006,3 +1245,12 @@ class HttpError extends Error {
     this.status = status;
   }
 }
+
+export {
+  INDEX_TIME_ZONES,
+  indexTimeZone,
+  marketDateFromUnix,
+  normalizeQuote,
+  normalizeTwseRealtimeQuote,
+  previousCloseFromAlignedDailyKLine,
+};
