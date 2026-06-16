@@ -26,6 +26,15 @@ const ALLOWED_INTERVALS = new Set(["1d", "1wk", "1mo"]);
 const TWSE_FALLBACK_RANGES = new Set(["1d", "5d", "1mo"]);
 const KV_TTL_SECONDS = 30 * 24 * 60 * 60;
 
+const INDEX_TIME_ZONES = Object.freeze({
+  "^TWII": "Asia/Taipei",
+  "^GSPC": "America/New_York",
+  "^IXIC": "America/New_York",
+  "^DJI": "America/New_York",
+  "^N225": "Asia/Tokyo",
+  "^HSI": "Asia/Hong_Kong",
+});
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
@@ -865,8 +874,78 @@ function upstreamJsonHeaders() {
   };
 }
 
-// 盤中以 meta 即時報價、收盤後退回 K 線陣列；前收一律用 meta.previousClose 或 K 線前一日，
-// 不使用 chartPreviousClose（除息/股利調整會使其與當日漲跌計算不一致）
+function indexTimeZone(symbol) {
+  return INDEX_TIME_ZONES[symbol] || null;
+}
+
+function marketDateFromUnix(timestamp, timeZone) {
+  if (!Number.isFinite(timestamp) || !timeZone) return null;
+
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(timestamp * 1000));
+
+  const values = Object.fromEntries(
+    parts
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
+  );
+
+  if (!values.year || !values.month || !values.day) return null;
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function alignedPreviousCloseFromDailyKLine(symbol, payload, quoteMarketTime) {
+  const timeZone = indexTimeZone(symbol);
+  if (!timeZone) return null;
+
+  const result = payload?.chart?.result?.[0];
+  const closes = result?.indicators?.quote?.[0]?.close || [];
+  const timestamps = result?.timestamp || [];
+  const validPoints = closes
+    .map((close, index) => ({
+      close,
+      timestamp: timestamps[index],
+      marketDate: marketDateFromUnix(timestamps[index], timeZone),
+    }))
+    .filter((point) =>
+      Number.isFinite(point.close) &&
+      Number.isFinite(point.timestamp) &&
+      point.marketDate
+    );
+
+  if (validPoints.length < 2) return null;
+
+  const quoteMarketDate = marketDateFromUnix(quoteMarketTime, timeZone);
+  const lastPoint = validPoints.at(-1);
+  const prevPoint = validPoints.at(-2);
+
+  // Yahoo quote meta can advance before every field in meta is from the same
+  // exchange session.  We only replace meta.previousClose when the quote time
+  // and the latest non-null daily candle resolve to the same local trading day
+  // for that exchange.  If the 5d/1d candle has not caught up yet, using the
+  // previous candle would shift by one more day and create a different bad pct.
+  if (!quoteMarketDate || quoteMarketDate !== lastPoint.marketDate) {
+    return null;
+  }
+
+  return {
+    previousClose: prevPoint.close,
+    marketDate: quoteMarketDate,
+  };
+}
+
+function previousCloseFromAlignedDailyKLine(symbol, payload, quoteMarketTime) {
+  return alignedPreviousCloseFromDailyKLine(symbol, payload, quoteMarketTime)?.previousClose ?? null;
+}
+
+// 盤中以 meta 即時報價、收盤後退回 K 線陣列；前收不再無條件相信 meta.previousClose。
+// 對容易發生日線與 quote meta 交易日錯位的主要指數，先用交易所時區確認 quote marketTime
+// 與最後一根有效日 K 為同一交易日；只有對齊時才用倒數第二根有效日 K close 當前收。
+// 仍不使用 chartPreviousClose（除息/股利調整會使其與當日漲跌計算不一致）。
 function normalizeQuote(symbol, payload) {
   const result = payload?.chart?.result?.[0];
   if (!result?.meta) {
@@ -888,17 +967,29 @@ function normalizeQuote(symbol, payload) {
   const metaTime = meta.regularMarketTime || 0;
 
   let finalPrice, finalTime, finalPrevClose;
+  let previousCloseSource = null;
+  let previousCloseMarketDate = null;
+  const previousCloseOriginal = Number.isFinite(meta.previousClose) ? meta.previousClose : null;
 
   if (Number.isFinite(metaPrice) && metaTime >= lastKLine.timestamp) {
     // 盤中：使用最新的 meta 報價
     finalPrice = metaPrice;
     finalTime = metaTime;
-    finalPrevClose = meta.previousClose ?? prevKLine.value;
+    const alignedPrevClose = alignedPreviousCloseFromDailyKLine(symbol, payload, finalTime);
+    if (Number.isFinite(alignedPrevClose?.previousClose)) {
+      finalPrevClose = alignedPrevClose.previousClose;
+      previousCloseSource = "daily-kline-aligned";
+      previousCloseMarketDate = alignedPrevClose.marketDate;
+    } else {
+      finalPrevClose = meta.previousClose ?? prevKLine.value;
+      previousCloseSource = Number.isFinite(meta.previousClose) ? "yahoo-meta" : "daily-kline";
+    }
   } else if (Number.isFinite(lastKLine.value)) {
     // 收盤後或 meta 延遲：退回最穩定的 K 線陣列
     finalPrice = lastKLine.value;
     finalTime = lastKLine.timestamp;
     finalPrevClose = prevKLine.value;
+    previousCloseSource = "daily-kline";
   } else {
     throw new Error("No valid price found");
   }
@@ -909,15 +1000,25 @@ function normalizeQuote(symbol, payload) {
     ? { start: tp.start, end: tp.end }
     : null;
 
-  return {
+  const quote = {
     symbol,
     price: finalPrice,
     previousClose: Number.isFinite(finalPrevClose) ? finalPrevClose : null,
+    previousCloseSource,
     currency: meta.currency || null,
     exchange: meta.exchangeName || null,
     marketTime: finalTime || null,
     session,
   };
+
+  if (previousCloseSource === "daily-kline-aligned" && Number.isFinite(previousCloseOriginal)) {
+    quote.previousCloseOriginal = previousCloseOriginal;
+  }
+  if (previousCloseMarketDate) {
+    quote.previousCloseMarketDate = previousCloseMarketDate;
+  }
+
+  return quote;
 }
 
 function rocDateToUnix(value) {
@@ -938,7 +1039,7 @@ function chartCacheTtl(range) {
 }
 
 function quoteCacheKey(symbol) {
-  return `quote:v4:${symbol}`;
+  return `quote:v5:${symbol}`;
 }
 
 function chartCacheKey(symbol, range, interval) {
@@ -968,7 +1069,16 @@ async function putCache(env, key, value, signature = null) {
 }
 
 function quoteSignature(quote) {
-  return `q:${quote.price}|${quote.previousClose}|${quote.marketTime}|${quote.session?.start ?? ""}`;
+  return [
+    "q",
+    quote.price,
+    quote.previousClose,
+    quote.previousCloseSource ?? "",
+    quote.previousCloseOriginal ?? "",
+    quote.previousCloseMarketDate ?? "",
+    quote.marketTime,
+    quote.session?.start ?? "",
+  ].join("|");
 }
 
 async function getCache(env, key) {
@@ -1006,3 +1116,11 @@ class HttpError extends Error {
     this.status = status;
   }
 }
+
+export {
+  INDEX_TIME_ZONES,
+  indexTimeZone,
+  marketDateFromUnix,
+  normalizeQuote,
+  previousCloseFromAlignedDailyKLine,
+};
