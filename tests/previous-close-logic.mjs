@@ -3,6 +3,7 @@ import {
   indexTimeZone,
   marketDateFromUnix,
   normalizeQuote,
+  normalizeTwseRealtimeQuote,
   previousCloseFromAlignedDailyKLine,
 } from "../worker/worker.js";
 
@@ -63,7 +64,6 @@ function pctChange(price, previousClose) {
     marketTime: quoteMarketTime,
     points: [
       { timestamp: unixUtc(2026, 5, 12, 1), close: 44506.85 },
-      { timestamp: unixUtc(2026, 5, 14, 1), close: null },
       { timestamp: unixUtc(2026, 5, 15, 1), close: 45396.99 },
     ],
   });
@@ -100,6 +100,61 @@ function pctChange(price, previousClose) {
   assert.equal(unchanged.previousClose, 43149.4609375);
   assert.equal(unchanged.previousCloseSource, "yahoo-meta");
   assert.equal(unchanged.previousCloseOriginal, undefined);
+}
+
+{
+  const payload = yahooPayload({
+    symbol: "^TWII",
+    currency: "TWD",
+    exchange: "TAI",
+    price: 45586.34,
+    previousClose: undefined,
+    marketTime: 1781580405,
+    points: [
+      { timestamp: unixUtc(2026, 5, 10, 1), close: 43225.54 },
+      { timestamp: unixUtc(2026, 5, 11, 1), close: 43149.46 },
+      { timestamp: unixUtc(2026, 5, 12, 1), close: 44169.04 },
+      { timestamp: unixUtc(2026, 5, 15, 1), close: null },
+      { timestamp: unixUtc(2026, 5, 16, 1), close: 45586.34 },
+    ],
+  });
+
+  const guarded = normalizeQuote("^TWII", payload);
+
+  assert.equal(previousCloseFromAlignedDailyKLine("^TWII", payload, 1781580405), null);
+  assert.equal(guarded.previousClose, null);
+  assert.equal(guarded.previousCloseSource, "daily-kline");
+}
+
+{
+  const twseQuote = normalizeTwseRealtimeQuote({
+    msgArray: [{
+      ch: "t00.tw",
+      d: "20260616",
+      t: "11:46:50",
+      z: "45690.82",
+      y: "45396.99",
+      o: "45500.08",
+      h: "45737.69",
+      l: "45266.34",
+    }],
+  });
+
+  assert.equal(twseQuote.symbol, "^TWII");
+  assert.equal(twseQuote.price, 45690.82);
+  assert.equal(twseQuote.previousClose, 45396.99);
+  assert.equal(twseQuote.previousCloseSource, "twse-realtime");
+  assert.equal(twseQuote.open, 45500.08);
+  assert.equal(twseQuote.dayHigh, 45737.69);
+  assert.equal(twseQuote.dayLow, 45266.34);
+  assert.equal(marketDateFromUnix(twseQuote.marketTime, "Asia/Taipei"), "2026-06-16");
+  assert.deepEqual(twseQuote.session, {
+    start: unixUtc(2026, 5, 16, 1),
+    end: unixUtc(2026, 5, 16, 5, 30),
+  });
+
+  const pct = pctChange(twseQuote.price, twseQuote.previousClose);
+  assert.ok(pct > 0.6 && pct < 0.7, `TWSE realtime pct should be about +0.64%, got ${pct}`);
 }
 
 {
