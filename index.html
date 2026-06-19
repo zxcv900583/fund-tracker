@@ -133,7 +133,32 @@ body[data-private="true"] .summary .val,
 body[data-private="true"] #statusBar b,
 body[data-private="true"] #tbody td.amt,
 body[data-private="true"] #mngXirr,
-body[data-private="true"] #purBody tr.totRow td{filter:blur(7px);transition:filter .15s;cursor:default}
+body[data-private="true"] #purBody tr.totRow td,
+body[data-private="true"] #contribBody .amt,
+body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter .15s;cursor:default}
+/* N3 報酬貢獻度排行 */
+.contrib-total{font-size:14px;font-weight:700;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+.contrib-row{padding:8px 0;border-bottom:1px solid var(--border)}
+.contrib-row:last-child{border-bottom:none}
+.contrib-head{display:flex;align-items:baseline;gap:8px;font-size:14px}
+.contrib-head .nm{font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.contrib-head .amt{font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap}
+.contrib-head .pct{font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.contrib-sub{font-size:11px;color:var(--muted);margin-top:2px;font-variant-numeric:tabular-nums}
+.contrib-track{height:7px;border-radius:4px;background:var(--panel2);margin-top:5px;overflow:hidden}
+.contrib-fill{height:100%;border-radius:4px}
+.contrib-fill.pos{background:var(--up)} .contrib-fill.neg{background:var(--down)}
+/* N10 交易總覽時間軸 */
+.tl-empty{text-align:center;color:var(--muted);padding:24px 0;font-size:13px}
+.tl-item{border:1px solid var(--border);border-radius:8px;padding:8px 11px;margin-bottom:7px;font-size:13.5px;line-height:1.5;border-left-width:4px}
+.tl-item.buy{border-left-color:var(--lump)} .tl-item.sell{border-left-color:var(--down)} .tl-item.div{border-left-color:var(--flat)}
+.tl-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tl-date{font-variant-numeric:tabular-nums;color:var(--muted);font-size:12px;white-space:nowrap}
+.tl-name{font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tl-kind{font-size:10px;border-radius:4px;padding:1px 6px;color:#fff;white-space:nowrap}
+.tl-kind.buy{background:var(--lump)} .tl-kind.sell{background:var(--down)} .tl-kind.div{background:var(--flat)}
+.tl-detail{margin-top:3px;font-variant-numeric:tabular-nums}
+.tl-note{font-size:11px;color:var(--muted);margin-top:2px}
 .note{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.5}
 #toast{position:fixed;bottom:46px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:8px 18px;border-radius:20px;font-size:13px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:99;max-width:90vw}
 #toast.show{opacity:.93}
@@ -276,6 +301,8 @@ body[data-private="true"] #purBody tr.totRow td{filter:blur(7px);transition:filt
     <button class="tab" id="btnPortfolio" title="整體投資組合走勢">📊 組合</button>
     <button class="tab" id="btnCompareView" title="比較多檔資產與市場（重疊折線）">⚖ 比較</button>
     <button class="tab" id="btnAlloc" title="資產配置圓餅圖">🥧 配置</button>
+    <button class="tab" id="btnContrib" title="各持倉損益貢獻排行">🏆 貢獻</button>
+    <button class="tab" id="btnTimeline" title="所有買賣與配息的時間軸">🧾 紀錄</button>
     <button class="tab" id="modeToggle" title="切換 % / 淨值">%</button>
   </div>
   <div id="comparePanel" hidden>
@@ -517,6 +544,18 @@ body[data-private="true"] #purBody tr.totRow td{filter:blur(7px);transition:filt
   </div>
 </dialog>
 
+<!-- ===== N3 報酬貢獻度排行 Dialog（唯讀） ===== -->
+<dialog id="dlgContrib" style="width:min(620px,95vw);max-width:95vw">
+  <div class="dlgHead"><span>報酬貢獻度排行（依總損益 TWD）</span><button class="xBtn" data-close="dlgContrib">✕</button></div>
+  <div class="dlgBody"><div id="contribBody"></div></div>
+</dialog>
+
+<!-- ===== N10 交易總覽時間軸 Dialog（唯讀） ===== -->
+<dialog id="dlgTimeline" style="width:min(620px,95vw);max-width:95vw">
+  <div class="dlgHead"><span>交易總覽時間軸（買 / 賣 / 配息）</span><button class="xBtn" data-close="dlgTimeline">✕</button></div>
+  <div class="dlgBody"><div id="timelineBody"></div></div>
+</dialog>
+
 <!-- ===== 交易明細 Dialog（點圖上 B/S 標記） ===== -->
 <dialog id="dlgTxn">
   <div class="dlgHead"><span id="txnDetailTitle">交易明細</span><button class="xBtn" data-close="dlgTxn">✕</button></div>
@@ -632,6 +671,11 @@ body[data-private="true"] #purBody tr.totRow td{filter:blur(7px);transition:filt
          value>0)畫 doughnut，tooltip 顯示金額與占比%，固定 10 色調色盤循環；
          完全獨立於主圖(不動 chartView/selectedId)，建立前先 destroy 舊實例、
          關閉彈窗時 destroy 釋放；無持倉時顯示提示不崩。
+   v1.20 兩項純新增低風險（唯讀彈窗，不動計算/主圖）：①N3 報酬貢獻度排行——
+         chartBar 加「🏆 貢獻」鈕開 #dlgContrib，各持倉總損益(TWD)由大到小排序、
+         附條狀圖與已實現/未實現拆分、總損益合計。②N10 交易總覽時間軸——加
+         「🧾 紀錄」鈕開 #dlgTimeline，彙整所有買/賣/配息跨標的一條時間線(新到舊)。
+         皆唯讀、用既有 rowData/positionOf/fxOf，隱私模式一併模糊其金額。
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
@@ -3403,6 +3447,92 @@ function openAlloc(){
   });
 }
 
+/* ===== N3 報酬貢獻度排行（唯讀，TWD，不動任何計算/主圖） ===== */
+function openContrib(){
+  const items = holdings.map(h=>{
+    const d = rowData(h), fx = fxOf(h);
+    return {
+      name: h.fundName,
+      plTwd: (d.pl??0)*fx,
+      valTwd: (d.value??0)*fx,
+      realizedTwd: (d.realized||0)*fx,
+      unrealTwd: (d.unrealized??0)*fx,
+      plPct: d.plPct
+    };
+  }).sort((a,b)=> b.plTwd - a.plTwd);
+  const totalPl = items.reduce((s,x)=>s+x.plTwd, 0);
+  const maxAbs = items.reduce((m,x)=>Math.max(m, Math.abs(x.plTwd)), 0);
+  const body = $("#contribBody");
+  const meaningful = items.filter(x=>Math.abs(x.plTwd)>0.5);
+  if(!items.length || maxAbs<=0.5){
+    body.innerHTML = `<div class="tl-empty">${!items.length?"尚無持倉":"目前所有持倉損益皆為 0，無可排行的貢獻"}</div>`;
+    $("#dlgContrib").showModal();
+    return;
+  }
+  const totalCls = clsOf(totalPl);
+  let html = `<div class="contrib-total">總損益合計：<span class="amt ${totalCls}">${signed(totalPl,0)}</span> <span class="subTxt">TWD</span></div>`;
+  html += items.map(x=>{
+    const cls = clsOf(x.plTwd);
+    const w = maxAbs>0 ? Math.max(2, Math.abs(x.plTwd)/maxAbs*100) : 0;
+    const pctTxt = (x.plPct!=null) ? `<span class="pct ${cls}">${signed(x.plPct,2,"%")}</span>` : `<span class="pct flat">—</span>`;
+    return `<div class="contrib-row">
+      <div class="contrib-head">
+        <span class="nm" title="${esc(x.name)}">${esc(x.name)}</span>
+        <span class="amt ${cls}">${signed(x.plTwd,0)}</span>
+        ${pctTxt}
+      </div>
+      <div class="contrib-sub">已實現 <span class="amt ${clsOf(x.realizedTwd)}">${signed(x.realizedTwd,0)}</span>　未實現 <span class="amt ${clsOf(x.unrealTwd)}">${signed(x.unrealTwd,0)}</span></div>
+      <div class="contrib-track"><div class="contrib-fill ${cls}" style="width:${w.toFixed(1)}%"></div></div>
+    </div>`;
+  }).join("");
+  body.innerHTML = html;
+  $("#dlgContrib").showModal();
+}
+
+/* ===== N10 交易總覽時間軸（唯讀，彙整所有買/賣/配息，新到舊） ===== */
+function openTimeline(){
+  const events = [];
+  holdings.forEach(h=>{
+    const cur = h.currency, isStock = h.assetType==="stock";
+    const unitName = isStock ? "股" : "單位";
+    (h.purchases||[]).forEach(p=>{
+      const amt = (p.amount!=null && +p.amount>0) ? +p.amount : (+p.units||0)*(+p.navAtPurchase||0);
+      const label = isStock ? "買入" : (p.type==="RSP" ? "定期定額" : "單筆");
+      events.push({date:p.date||"", name:h.fundName, kind:"buy", kindLabel:label,
+        detail:`${fmtN(+p.units,4)} ${unitName} × ${fmtN(+p.navAtPurchase, p.navAtPurchase>=100?2:4)}`,
+        amtTxt:`成本 ${fmtN(amt+(+p.fee||0),0)} ${cur}${+p.fee>0?`（含費 ${fmtN(+p.fee,0)}）`:""}`,
+        note:p.note||""});
+    });
+    (h.sells||[]).forEach(s=>{
+      events.push({date:s.date||"", name:h.fundName, kind:"sell", kindLabel:"賣出",
+        detail:`${fmtN(+s.units,4)} ${unitName} × ${fmtN(+s.price, s.price>=100?2:4)}`,
+        amtTxt:`價金 ${fmtN((+s.units||0)*(+s.price||0)-(+s.fee||0),0)} ${cur}${+s.fee>0?`（扣費 ${fmtN(+s.fee,0)}）`:""}`,
+        note:s.note||""});
+    });
+    (h.dividends||[]).forEach(d=>{
+      events.push({date:d.date||"", name:h.fundName, kind:"div", kindLabel:"配息",
+        detail:"", amtTxt:`配息 ${fmtN(+d.amount,2)} ${cur}`, note:d.note||""});
+    });
+  });
+  events.sort((a,b)=> (a.date<b.date?1:a.date>b.date?-1:0));
+  const body = $("#timelineBody");
+  if(!events.length){
+    body.innerHTML = `<div class="tl-empty">尚無交易紀錄</div>`;
+    $("#dlgTimeline").showModal();
+    return;
+  }
+  body.innerHTML = events.map(e=>`<div class="tl-item ${e.kind}">
+    <div class="tl-head">
+      <span class="tl-date">${esc(e.date)}</span>
+      <span class="tl-name" title="${esc(e.name)}">${esc(e.name)}</span>
+      <span class="tl-kind ${e.kind}">${esc(e.kindLabel)}</span>
+    </div>
+    <div class="tl-detail">${e.detail?esc(e.detail)+"　":""}<span class="amt">${esc(e.amtTxt)}</span></div>
+    ${e.note?`<div class="tl-note">${esc(e.note)}</div>`:""}
+  </div>`).join("");
+  $("#dlgTimeline").showModal();
+}
+
 $("#btnPortfolio").onclick = ()=>{
   chartView = chartView==="portfolio" ? "fund" : "portfolio";
   renderTabs(); renderChart();
@@ -3412,6 +3542,8 @@ $("#btnCompareView").onclick = ()=>{
   else enterCompareView();
 };
 $("#btnAlloc").onclick = openAlloc;
+$("#btnContrib").onclick = openContrib;
+$("#btnTimeline").onclick = openTimeline;
 $("#btnAddPur").onclick = ()=>openPurEdit(null);
 $("#btnPurCancel").onclick = ()=>{ $("#purEdit").hidden=true; editPurId=null; };
 $("#btnPurSave").onclick = savePur;

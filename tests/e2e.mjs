@@ -717,6 +717,44 @@ async function run() {
   assert.ok(watchBadge.gone, "移除後該列應消失（不影響後續斷言）");
   console.log("[e2e] watch badge passed:", JSON.stringify(watchBadge));
 
+  // N3 報酬貢獻度排行（唯讀彈窗）：依總損益排序、含已實現/未實現、無 NaN
+  const contrib = await cdp.evaluate(`(async()=>{
+    document.querySelector("#btnContrib").click();
+    await new Promise(r=>setTimeout(r,120));
+    const dlg=document.querySelector("#dlgContrib");
+    const rows=[...document.querySelectorAll("#contribBody .contrib-row")];
+    const amts=rows.map(r=>{const a=r.querySelector(".contrib-head .amt");return a?parseFloat(a.textContent.replace(/[^0-9.-]/g,"")):null;});
+    const sortedDesc = amts.every((v,i)=> i===0 || amts[i-1]>=v);
+    const res={open:dlg.open, rowCount:rows.length, hasTotal:!!document.querySelector("#contribBody .contrib-total"),
+      sortedDesc, nan:/NaN|Infinity|undefined/.test(document.querySelector("#contribBody").textContent)};
+    dlg.close();
+    return res;
+  })()`);
+  assert.ok(contrib.open, "點擊貢獻應開啟 #dlgContrib");
+  assert.ok(contrib.rowCount >= 1, "貢獻排行應至少一列");
+  assert.ok(contrib.hasTotal, "貢獻排行應有總損益合計列");
+  assert.ok(contrib.sortedDesc, "貢獻排行應依總損益由大到小");
+  assert.ok(!contrib.nan, "貢獻排行不應出現 NaN");
+  console.log("[e2e] contribution ranking passed:", JSON.stringify(contrib));
+
+  // N10 交易總覽時間軸（唯讀彈窗）：彙整買/賣/配息、日期新到舊、無 NaN
+  const timeline = await cdp.evaluate(`(async()=>{
+    document.querySelector("#btnTimeline").click();
+    await new Promise(r=>setTimeout(r,120));
+    const dlg=document.querySelector("#dlgTimeline");
+    const dates=[...document.querySelectorAll("#timelineBody .tl-date")].map(d=>d.textContent.trim());
+    const desc = dates.every((v,i)=> i===0 || dates[i-1]>=v);
+    const res={open:dlg.open, itemCount:document.querySelectorAll("#timelineBody .tl-item").length, datesDesc:desc,
+      nan:/NaN|Infinity|undefined/.test(document.querySelector("#timelineBody").textContent)};
+    dlg.close();
+    return res;
+  })()`);
+  assert.ok(timeline.open, "點擊紀錄應開啟 #dlgTimeline");
+  assert.ok(timeline.itemCount >= 1, "交易時間軸應至少一筆");
+  assert.ok(timeline.datesDesc, "交易時間軸應依日期新到舊");
+  assert.ok(!timeline.nan, "交易時間軸不應出現 NaN");
+  console.log("[e2e] transaction timeline passed:", JSON.stringify(timeline));
+
   // 買賣標記：圖上標 B/S、點 S 看明細；賣出以平均成本法扣減持股、計入已實現損益
   await cdp.evaluate(`[...document.querySelectorAll("#tbody tr[data-id]")].find(tr=>tr.textContent.includes("2330.TW")).click()`);
   await waitForPage(cdp, `chartView==="fund" && chart?.data?.datasets?.length===1 && (chart.options.plugins?.markers?.meta?.labels||[]).length>20`, 30000);
