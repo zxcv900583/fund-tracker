@@ -72,6 +72,7 @@ tbody tr.sel{background:var(--sel)}
 /* ===== Chart area ===== */
 #chartArea{flex:1 1 auto;display:flex;flex-direction:column;background:var(--panel);border-top:2px solid var(--border);min-height:62vh}
 #chartBar{display:flex;align-items:center;gap:6px;padding:8px 10px;flex-wrap:wrap;border-bottom:1px solid var(--border)}
+.chart-actions{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
 #chartTitle{font-size:15px;font-weight:700;margin-right:6px;max-width:330px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tabs{display:flex;gap:4px;flex-wrap:wrap}
 .tab{border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:13px;border-radius:6px;padding:5px 9px;min-height:32px}
@@ -209,12 +210,14 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
   .operation-cell{min-width:228px}
   .operation-cell .rowBtns button{font-size:12px;min-height:36px;padding:6px 9px}
   #chartArea{flex:none;min-height:600px;height:72vh;scroll-margin-top:8px}
-  #chartBar{display:grid;grid-template-columns:1fr auto auto;align-items:center;padding:9px 10px;gap:7px}
-  #chartTitle{grid-column:1;grid-row:1;max-width:100%;font-size:16px}
-  #rangeTabs{grid-column:1/-1;grid-row:2;display:flex;flex-wrap:nowrap;overflow-x:auto;padding-bottom:3px;scrollbar-width:thin}
+  /* 手機 chartBar：三條乾淨的列 — 標題 / 可橫向捲動的按鈕 / 可橫向捲動的區間 */
+  #chartBar{display:flex;flex-wrap:wrap;align-items:center;padding:9px 10px;gap:7px}
+  #chartTitle{order:1;flex:1 1 100%;max-width:100%;font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #chartBar .spacer{display:none}
+  .chart-actions{order:2;flex:1 1 100%;display:flex;flex-wrap:nowrap;gap:5px;overflow-x:auto;scrollbar-width:thin;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+  .chart-actions .tab{flex:0 0 auto}
+  #rangeTabs{order:3;flex:1 1 100%;display:flex;flex-wrap:nowrap;overflow-x:auto;padding-bottom:3px;scrollbar-width:thin;margin:0}
   .tab{font-size:14px;min-height:40px;padding:8px 11px}
-  #btnPortfolio{grid-column:2;grid-row:1}
-  #modeToggle{grid-column:3;grid-row:1}
   #chartWrap{min-height:460px;padding:8px 8px 18px}
   #chartCanvas{inset:8px 8px 16px}
   #statusBar{font-size:13px;padding:7px 10px}
@@ -298,12 +301,14 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
     <span id="chartTitle">—</span>
     <div class="tabs" id="rangeTabs"></div>
     <span class="spacer" style="flex:1"></span>
-    <button class="tab" id="btnPortfolio" title="整體投資組合走勢">📊 組合</button>
-    <button class="tab" id="btnCompareView" title="比較多檔資產與市場（重疊折線）">⚖ 比較</button>
-    <button class="tab" id="btnAlloc" title="資產配置圓餅圖">🥧 配置</button>
-    <button class="tab" id="btnContrib" title="各持倉損益貢獻排行">🏆 貢獻</button>
-    <button class="tab" id="btnTimeline" title="所有買賣與配息的時間軸">🧾 紀錄</button>
-    <button class="tab" id="modeToggle" title="切換 % / 淨值">%</button>
+    <div class="chart-actions">
+      <button class="tab" id="btnPortfolio" title="整體投資組合走勢">📊 組合</button>
+      <button class="tab" id="btnCompareView" title="比較多檔資產與市場（重疊折線）">⚖ 比較</button>
+      <button class="tab" id="btnAlloc" title="資產配置圓餅圖">🥧 配置</button>
+      <button class="tab" id="btnContrib" title="各持倉損益貢獻排行">🏆 貢獻</button>
+      <button class="tab" id="btnTimeline" title="所有買賣與配息的時間軸">🧾 紀錄</button>
+      <button class="tab" id="modeToggle" title="切換 % / 淨值">%</button>
+    </div>
   </div>
   <div id="comparePanel" hidden>
     <div class="cmp-row">
@@ -676,6 +681,11 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
          附條狀圖與已實現/未實現拆分、總損益合計。②N10 交易總覽時間軸——加
          「🧾 紀錄」鈕開 #dlgTimeline，彙整所有買/賣/配息跨標的一條時間線(新到舊)。
          皆唯讀、用既有 rowData/positionOf/fxOf，隱私模式一併模糊其金額。
+   v1.21 手機 chartBar 版面修正：先前固定三欄 grid 只擺了組合/%，其餘按鈕(比較/
+         配置/貢獻/紀錄)被 auto-placement 擠到區間 tabs 下方、與圖表重疊很亂。改把
+         檢視/報表按鈕包成 .chart-actions 容器，手機版排成三條乾淨的列：標題 /
+         可橫向捲動的按鈕列 / 可橫向捲動的區間列（robust 不受按鈕數量影響）。
+         桌機維持原樣(flex-wrap)。新增 tests/mobile-shot.mjs 手機截圖驗證工具。
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */

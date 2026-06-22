@@ -8,3 +8,4 @@ cors_test.html
 *.csv
 desktop.ini
 Thumbs.db
+tests/_mobile-*.png
