@@ -392,13 +392,14 @@ async function run() {
   comparison.firstValues.forEach((value) => assert.ok(Math.abs(value) < 0.000001));
   comparison.points.forEach((count) => assert.ok(count > 20));
   assert.match(comparison.status, /共同起點/);
-  await cdp.evaluate(`document.querySelector('#marketRanges [data-market-range="1bd"]').click()`);
+  const setMkt = (v) => `(()=>{const s=document.querySelector("#marketRangeSelect");s.value="${v}";s.dispatchEvent(new Event("change",{bubbles:true}));})()`;
+  await cdp.evaluate(setMkt("1bd"));
   await waitForPage(cdp, `chart?.data?.datasets?.length===3 && chart.data.datasets.every(dataset=>dataset.data.filter(Number.isFinite).length===2)`,30000);
   const comparisonBusinessDayPoints = await cdp.evaluate(
     `chart.data.datasets.map(dataset=>dataset.data.filter(Number.isFinite).length)`
   );
   assert.deepEqual(comparisonBusinessDayPoints,[2,2,2]);
-  await cdp.evaluate(`document.querySelector('#marketRanges [data-market-range="1y"]').click()`);
+  await cdp.evaluate(setMkt("1y"));
   await waitForPage(cdp, `chart?.data?.datasets?.every(dataset=>dataset.data.filter(Number.isFinite).length>20)`,30000);
 
   // 比較選擇彈窗：點「選擇資產」開窗 → 取消第一檔基金 → 確定 → 走勢少一條
@@ -409,7 +410,7 @@ async function run() {
     funds:document.querySelectorAll("#dlgCompare input[data-fund-pick]").length,
     markets:document.querySelectorAll("#dlgCompare input[data-market-pick]").length,
     count:document.querySelector("#comparePickCount").textContent,
-    hasIncepRange:!!document.querySelector('#marketRanges [data-market-range="incep"]')
+    hasIncepRange:!!document.querySelector('#marketRangeSelect option[value="incep"]')
   })`);
   assert.ok(dlgInfo.funds >= 2, `彈窗應有基金選項，實際 ${dlgInfo.funds}`);
   assert.equal(dlgInfo.markets, 15);
@@ -427,9 +428,9 @@ async function run() {
   const afterCancel = await cdp.evaluate(`chart.data.datasets.length`);
   assert.equal(afterCancel, beforePickerCount - 1, "取消不應改變走勢數");
   // 成立至今：切到 incep 仍有走勢
-  await cdp.evaluate(`document.querySelector('#marketRanges [data-market-range="incep"]').click()`);
+  await cdp.evaluate(setMkt("incep"));
   await waitForPage(cdp, `marketRange==="incep" && chart?.data?.datasets?.length>=1 && chart.data.datasets.every(d=>d.data.filter(Number.isFinite).length>20)`, 30000);
-  await cdp.evaluate(`document.querySelector('#marketRanges [data-market-range="1y"]').click()`);
+  await cdp.evaluate(setMkt("1y"));
   await waitForPage(cdp, `marketRange==="1y"`, 30000);
   // 還原比較選擇，供後續跨資產段沿用（避免測試間相依）
   await cdp.evaluate(`(()=>{ compareFundIds=["holding_a","holding_b"]; marketSelection=["^GSPC"]; persistMarketSettings(); })()`);

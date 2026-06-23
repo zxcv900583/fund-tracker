@@ -83,8 +83,6 @@ tbody tr.sel{background:var(--sel)}
 #chartCanvas{position:absolute;inset:4px 8px 2px}
 #chartHint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);pointer-events:none}
 /* ===== Status bar ===== */
-#statusBar{flex:none;background:var(--panel2);border-top:1px solid var(--border);padding:4px 14px;font-size:12px;color:var(--muted);display:flex;gap:16px;flex-wrap:wrap}
-#statusBar b{font-variant-numeric:tabular-nums}
 /* ===== Dialogs ===== */
 dialog{border:1px solid var(--border);border-radius:10px;background:var(--panel);color:var(--text);padding:0;max-width:min(560px,94vw);width:520px;max-height:88vh}
 dialog::backdrop{background:rgba(0,0,0,.45)}
@@ -132,7 +130,6 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
 /* 隱私模式：碼住金額（純視覺，不改數值） */
 .priv-blur{filter:blur(7px);transition:filter .15s;cursor:default}
 body[data-private="true"] .summary .val,
-body[data-private="true"] #statusBar b,
 body[data-private="true"] #tbody td.amt,
 body[data-private="true"] #mngXirr,
 body[data-private="true"] #purBody tr.totRow td,
@@ -221,7 +218,6 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
   .tab{font-size:14px;min-height:40px;padding:8px 11px}
   #chartWrap{min-height:460px;padding:8px 8px 18px}
   #chartCanvas{inset:8px 8px 16px}
-  #statusBar{font-size:13px;padding:7px 10px}
   #toast{bottom:86px;font-size:14px}
   dialog{width:94vw}
   .dlgHead{font-size:16px}
@@ -326,11 +322,6 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
   </div>
 </div>
 
-<div id="statusBar">
-  <span>總投資 <b id="sbCost">—</b></span>
-  <span>總損益 <b id="sbPL">—</b></span>
-  <span id="sbSel"></span>
-</div>
 
 <!-- ===== 新增基金 Dialog ===== -->
 <dialog id="dlgAdd">
@@ -694,6 +685,9 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
          一個 <select>(rangeSelect) 下拉，「自訂」獨立成旁邊一顆按鈕(開原本自訂日期
          彈窗)。renderTabs 產生 select+選項(含停用/選中)，applyRange() 處理切換、
          掛在 #rangeTabs 的 change 委派(重繪不失效)。版面更精簡、桌機手機皆適用。
+   v1.24 三項版面調整：①移除圖表下方狀態列(#statusBar：總投資/總損益/已選，與上方
+         摘要重複)及其 CSS/JS。②「自訂」按鈕改名「自訂時間」。③比較面板區間 tabs
+         也改為下拉選單(marketRangeSelect)，與主圖一致；onclick 改 change 委派。
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
@@ -1227,9 +1221,11 @@ function renderMarketControls(){
     <input type="checkbox" data-market-pick="${esc(item.symbol)}" ${marketSelection.includes(item.symbol)?"checked":""}>
     ${esc(item.name)}
   </label>`).join("");
-  $("#marketRanges").innerHTML = MARKET_RANGES.map(([label,value])=>
-    `<button class="tab${marketRange===value?" on":""}" data-market-range="${value}">${label}</button>`
-  ).join("");
+  $("#marketRanges").innerHTML =
+    `<select id="marketRangeSelect" class="range-select" title="選擇比較區間" aria-label="比較區間">`
+    + MARKET_RANGES.map(([label,value])=>
+        `<option value="${esc(value)}"${marketRange===value?" selected":""}>${esc(label)}</option>`).join("")
+    + `</select>`;
   updateComparePickLabel();
 }
 
@@ -1891,10 +1887,6 @@ function renderHeader(){
   const elX = $("#sumXirr");
   elX.textContent = (r!=null) ? signed(r*100,2,"%") : "—";
   elX.className = "val "+clsOf(r||0);
-  $("#sbCost").textContent = has?fmtMoney(cost):"—";
-  const sb=$("#sbPL");
-  sb.textContent = has?signed(pl,0):"—";
-  sb.className = clsOf(pl);
 }
 
 function renderTable(){
@@ -1973,9 +1965,9 @@ function renderTabs(){
   const customActive = curRange==="自訂";
   $("#rangeTabs").innerHTML =
     `<select id="rangeSelect" class="range-select" title="選擇時間區間" aria-label="時間區間">`
-    + (customActive ? `<option value="__custom__" selected hidden>自訂區間</option>` : "")
+    + (customActive ? `<option value="__custom__" selected hidden>自訂時間</option>` : "")
     + opts + `</select>`
-    + `<button class="tab${customActive?" on":""}" data-r="自訂" title="自訂時間區間">自訂</button>`;
+    + `<button class="tab${customActive?" on":""}" data-r="自訂" title="自訂時間區間">自訂時間</button>`;
 }
 
 function chartFontSize(){
@@ -2346,8 +2338,6 @@ function renderAll(withChart=true){
   renderHeader();
   renderTable();
   renderTabs();
-  const h = holdings.find(x=>x.id===selectedId);
-  $("#sbSel").textContent = h? "已選：" + h.fundName : "";
   if(withChart) renderChart();
 }
 
@@ -3312,10 +3302,10 @@ $("#btnCompareConfirm").onclick = ()=>{
     if(window.matchMedia("(max-width:640px)").matches) $("#chartWrap")?.scrollIntoView({behavior:"smooth",block:"center"});
   }).catch(()=>{});
 };
-$("#marketRanges").onclick = async event=>{
-  const button = event.target.closest("[data-market-range]");
-  if(!button || button.dataset.marketRange===marketRange) return;
-  marketRange = button.dataset.marketRange;
+$("#marketRanges").addEventListener("change", async event=>{
+  if(!event.target || event.target.id!=="marketRangeSelect") return;
+  if(event.target.value===marketRange) return;
+  marketRange = event.target.value;
   persistMarketSettings();
   renderMarketControls();
   // 成立至今：先補齊各庫存資產的真實全歷史（基金 Morningstar 早期、股票 max）
@@ -3327,7 +3317,7 @@ $("#marketRanges").onclick = async event=>{
     }
   }
   loadMarketHistory(false);
-};
+});
 $("#btnMarketHistoryRefresh").onclick = ()=>loadMarketHistory(true);
 $("#btnTheme").onclick = ()=>{
   settings.theme = (document.body.dataset.theme==="light")?"dark":"light";
