@@ -267,7 +267,7 @@ async function run() {
     fundBadges:[...document.querySelectorAll("#tbody tr .badge.FUND")].map(badge=>badge.textContent.trim()),
     hasPriceDateHeading:[...document.querySelectorAll("#fundTable th")].some(th=>th.textContent.includes("價格日")),
     updateButtonsTogether:document.querySelector("#btnRefresh")?.parentElement===document.querySelector("#btnMarketRefresh")?.parentElement,
-    shortRanges:[...document.querySelectorAll("#rangeTabs [data-r]")].map(button=>button.dataset.r).filter(value=>["1D","2D","5D","21D"].includes(value)),
+    shortRanges:[...document.querySelectorAll("#rangeSelect option")].map(o=>o.value).filter(value=>["1D","2D","5D","21D"].includes(value)),
     sessionBeforeClose:taiwanSessionStatus(new Date("2026-06-12T05:29:00Z")).label,
     sessionAtClose:taiwanSessionStatus(new Date("2026-06-12T05:30:00Z")).label,
     summaryCost:document.querySelector("#sumCost")?.textContent,
@@ -538,13 +538,14 @@ async function run() {
   console.log("[e2e] stock holding and chart passed; latest-price parity:", JSON.stringify(stockLatestParity));
 
   const shortRangePoints = {};
+  const setRange = (r) => `(()=>{const s=document.querySelector("#rangeSelect");s.value="${r}";s.dispatchEvent(new Event("change",{bubbles:true}));})()`;
   for (const [range, expectedPoints] of [["1D",2],["2D",3],["5D",6],["21D",22]]) {
-    await cdp.evaluate(`document.querySelector('#rangeTabs [data-r="${range}"]').click()`);
+    await cdp.evaluate(setRange(range));
     await waitForPage(cdp, `chart?.data?.datasets?.[0]?.data?.filter(Number.isFinite).length===${expectedPoints}`);
     shortRangePoints[range] = await cdp.evaluate(`chart.data.datasets[0].data.filter(Number.isFinite).length`);
   }
   assert.deepEqual(shortRangePoints, { "1D":2, "2D":3, "5D":6, "21D":22 });
-  await cdp.evaluate(`document.querySelector('#rangeTabs [data-r="1Y"]').click()`);
+  await cdp.evaluate(setRange("1Y"));
   console.log("[e2e] business-day ranges passed");
 
   await cdp.evaluate(`(() => {

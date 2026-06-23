@@ -73,6 +73,7 @@ tbody tr.sel{background:var(--sel)}
 #chartArea{flex:1 1 auto;display:flex;flex-direction:column;background:var(--panel);border-top:2px solid var(--border);min-height:62vh}
 #chartBar{display:flex;align-items:center;gap:6px;padding:8px 10px;flex-wrap:wrap;border-bottom:1px solid var(--border)}
 .chart-actions{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.range-select{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:7px 10px;font-size:13px;font-family:inherit;min-height:34px;cursor:pointer;max-width:170px}
 #chartTitle{font-size:15px;font-weight:700;margin-right:6px;max-width:330px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tabs{display:flex;gap:4px;flex-wrap:wrap}
 .tab{border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:13px;border-radius:6px;padding:5px 9px;min-height:32px}
@@ -686,6 +687,13 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
          檢視/報表按鈕包成 .chart-actions 容器，手機版排成三條乾淨的列：標題 /
          可橫向捲動的按鈕列 / 可橫向捲動的區間列（robust 不受按鈕數量影響）。
          桌機維持原樣(flex-wrap)。新增 tests/mobile-shot.mjs 手機截圖驗證工具。
+   v1.22 修正「成立至今」等長跨距日期軸重疊：原本跨年顯示 YYYY/M、手機 7 個刻度
+         不旋轉，多年時寬標籤擠成一團。改為 >2年只顯示年份(窄、不擠)、1~2年 YYYY/M、
+         一年內 M/D；手機刻度上限 7→6。chartXAxisTicks 集中處理，三圖共用。
+   v1.23 時間區間改下拉選單：原本 1D~成立至今 一長排按鈕(手機要橫向捲動)，改為
+         一個 <select>(rangeSelect) 下拉，「自訂」獨立成旁邊一顆按鈕(開原本自訂日期
+         彈窗)。renderTabs 產生 select+選項(含停用/選中)，applyRange() 處理切換、
+         掛在 #rangeTabs 的 change 委派(重繪不失效)。版面更精簡、桌機手機皆適用。
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
@@ -1954,13 +1962,20 @@ function renderTabs(){
   const availablePoints = chartView==="portfolio"
     ? Math.max(0,...holdings.map(h=>getCache(h).navHistory.length))
     : (selected?getCache(selected).navHistory.length:0);
-  $("#rangeTabs").innerHTML = RANGES.map(([k,days,businessDays])=>{
-    const dis = k!=="自訂" && k!=="成立至今" && (
+  // 時間區間改為下拉選單（1D~成立至今），「自訂」獨立成旁邊一顆按鈕
+  const opts = RANGES.filter(([k])=>k!=="自訂").map(([k,days,businessDays])=>{
+    const dis = k!=="成立至今" && (
       businessDays ? availablePoints<businessDays+1 : (span>0 && days>span+40)
     );
     const title = businessDays ? `${businessDays} 個營業日` : (k==="成立至今"?"從最早資料起算":k);
-    return `<button class="tab${k===curRange?" on":""}" data-r="${k}" title="${title}" ${dis?"disabled":""}>${k}</button>`;
+    return `<option value="${esc(k)}"${k===curRange?" selected":""}${dis?" disabled":""} title="${esc(title)}">${esc(k)}</option>`;
   }).join("");
+  const customActive = curRange==="自訂";
+  $("#rangeTabs").innerHTML =
+    `<select id="rangeSelect" class="range-select" title="選擇時間區間" aria-label="時間區間">`
+    + (customActive ? `<option value="__custom__" selected hidden>自訂區間</option>` : "")
+    + opts + `</select>`
+    + `<button class="tab${customActive?" on":""}" data-r="自訂" title="自訂時間區間">自訂</button>`;
 }
 
 function chartFontSize(){
@@ -1968,7 +1983,7 @@ function chartFontSize(){
 }
 
 function chartTickLimit(){
-  return window.matchMedia("(max-width:640px)").matches ? 7 : 10;
+  return window.matchMedia("(max-width:640px)").matches ? 6 : 10;
 }
 
 function chartLayoutPadding(){
@@ -2014,8 +2029,9 @@ function chartXAxisTicks(color,fontSize){
     padding:mobile?10:3,
     font:{size:fontSize},
     autoSkip:true,
-    // 依整體跨距決定日期格式：跨一年以上→年/月，一年內→月/日；非日期標籤（營業日/目前）原樣
-    callback:function(value){
+    // 依整體跨距決定日期格式：>2年→只顯示年份(同年只標一次，避免長跨距重疊)，
+    // 1~2年→年/月，一年內→月/日；非日期標籤（營業日/目前）原樣
+    callback:function(value, index, ticks){
       const l = this.getLabelForValue(value);
       const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(l);
       if(!m) return l;
@@ -2023,6 +2039,8 @@ function chartXAxisTicks(color,fontSize){
       const first = labels[0], last = labels[labels.length-1];
       const spanDays = (typeof first==="string" && typeof last==="string")
         ? (new Date(last) - new Date(first))/864e5 : 0;
+      // 長跨距(>2年)只顯示年份(窄、不擠)；1~2年→年/月；一年內→月/日
+      if(spanDays > 366*2) return m[1];
       return spanDays > 366 ? `${m[1]}/${+m[2]}` : `${+m[2]}/${+m[3]}`;
     }
   };
@@ -3388,15 +3406,8 @@ document.querySelectorAll("thead th[data-k]").forEach(th=>{
     renderTable();
   };
 });
-$("#rangeTabs").onclick = async e=>{
-  const b = e.target.closest(".tab"); if(!b||b.disabled) return;
-  if(b.dataset.r==="自訂"){
-    $("#crStart").value = customRange?customRange.start:addDays(todayStr(),-90);
-    $("#crEnd").value = customRange?customRange.end:todayStr();
-    $("#dlgRange").showModal();
-    return;
-  }
-  curRange = b.dataset.r;
+async function applyRange(r){
+  curRange = r;
   settings.defaultChartRange = curRange; lsSet(LS_S,settings);
   // 成立至今：先補齊該資產真實全歷史
   const sel = holdings.find(h=>h.id===selectedId);
@@ -3405,6 +3416,20 @@ $("#rangeTabs").onclick = async e=>{
     await ensureInceptionHistory(sel);
   }
   renderAll();
+}
+// 下拉選單切換區間
+$("#rangeTabs").addEventListener("change", e=>{
+  if(e.target && e.target.id==="rangeSelect"){
+    const v = e.target.value;
+    if(v && v!=="__custom__") applyRange(v);
+  }
+});
+// 「自訂」按鈕 → 開自訂日期彈窗
+$("#rangeTabs").onclick = e=>{
+  const b = e.target.closest('.tab[data-r="自訂"]'); if(!b) return;
+  $("#crStart").value = customRange?customRange.start:addDays(todayStr(),-90);
+  $("#crEnd").value = customRange?customRange.end:todayStr();
+  $("#dlgRange").showModal();
 };
 $("#btnRangeOk").onclick = ()=>{
   const s=$("#crStart").value, en=$("#crEnd").value;
