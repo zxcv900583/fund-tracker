@@ -56,7 +56,7 @@
 
 Worker 防護：
 
-- **Origin 白名單**——瀏覽器跨站請求僅允許本站（github.io）與本機開發來源，其他網站嵌用一律 403
+- **Origin 白名單**——瀏覽器跨站請求僅允許本站（github.io）與本機開發來源，其他網站嵌用一律 403。`Origin: null`（file:// 雙擊與沙箱 iframe 無法區分）預設放行以支援離線雙擊；不需要時在 `wrangler.jsonc` vars 設 `BLOCK_NULL_ORIGIN: "1"` 封鎖
 - **速率限制**——每 IP 每分鐘 120 次（deep health 5 次）；如需更強防護可在 Cloudflare Dashboard 另加 WAF rate-limiting 規則
 - **深度健康檢查金鑰**——執行 `wrangler secret put HEALTH_KEY` 設定後，`/health?deep=1` 需帶 `&key=<值>` 才可使用
 - **KV 節流**——資料內容未變動時不重複寫入，節省免費額度（寫入 1,000 次/日）

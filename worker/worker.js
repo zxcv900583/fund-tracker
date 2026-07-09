@@ -48,11 +48,15 @@ const SECURITY_HEADERS = {
   "Referrer-Policy": "no-referrer",
 };
 
-// 瀏覽器請求僅允許本站與本機開發來源；無 Origin（curl/Node）與 file://（"null"）放行，
-// 目的是阻擋其他網站把本 Worker 當免費行情 API 嵌用
+// 瀏覽器請求僅允許本站與本機開發來源；無 Origin（curl/Node）放行，
+// 目的是阻擋其他網站把本 Worker 當免費行情 API 嵌用。
+// Origin "null" 的取捨：file:// 雙擊開啟（README 明載支援）與他站沙箱 iframe 的
+// Origin 都是 "null"，無法區分——預設放行以保留離線雙擊使用；若不需要，
+// 在 wrangler.jsonc vars 設 BLOCK_NULL_ORIGIN: "1" 即可封鎖 iframe 繞過。
 const PROD_ORIGIN = "https://zxcv900583.github.io";
-function isAllowedOrigin(origin) {
-  if (!origin || origin === "null") return true;
+function isAllowedOrigin(origin, env) {
+  if (!origin) return true;
+  if (origin === "null") return env?.BLOCK_NULL_ORIGIN !== "1";
   try {
     const url = new URL(origin);
     if (url.hostname === "localhost" || url.hostname === "127.0.0.1") return true;
@@ -83,7 +87,7 @@ function withinRateLimit(request, limit, scope = "") {
 export default {
   async fetch(request, env) {
     const origin = request.headers.get("Origin");
-    if (!isAllowedOrigin(origin)) {
+    if (!isAllowedOrigin(origin, env)) {
       return jsonResponse({ error: "Origin not allowed" }, 403);
     }
 
@@ -142,7 +146,7 @@ async function handleHealth(requestUrl, env, request) {
   const base = {
     status: "ok",
     service: "fund-tracker-market-api",
-    version: 8,
+    version: 9,
     cloudflareProxy: true,
     kvConfigured: Boolean(env.MARKET_CACHE),
     fallbackOrder: ["yahoo-query1", "yahoo-query2", "twse-for-taiwan", "cloudflare-kv-stale"],
