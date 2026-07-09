@@ -83,10 +83,14 @@ Worker 端點：
 本機驗證：
 
 ```powershell
+node tests/unit-calc.mjs
+node tests/previous-close-logic.mjs
 node tests/api-smoke.mjs
 node tests/e2e.mjs
 wrangler deploy --dry-run -c worker/wrangler.jsonc
 ```
+
+`unit-calc` 直接從 `index.html` 抽出 XIRR、平均成本法、定期定額排程、CSV 解析與匯入消毒等純函式做單元測試，免瀏覽器免網路。
 
 詳細規格見 [fund-tracker-spec.md](fund-tracker-spec.md)。
 
