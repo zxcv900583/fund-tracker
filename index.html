@@ -719,6 +719,12 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
          亮色塊；⑤badge 全改描邊 chip，彩色留給漲跌；⑥字體堆疊補 PingFang/Noto、
          focus-visible 焦點環、表頭 sticky 陰影、hover 過渡；⑦theme-color 與 PWA
          manifest 色票同步新深色。深色 accent 偏亮，primary 鈕/tab.on 改深墨字。
+   v1.27 淨值快取搬 IndexedDB：每檔快取上限 MAX_HIST 點約 240KB，localStorage 5MB
+         配額十幾檔全歷史就會滿。新增儲存層 navStoreSave/Delete＋initNavStore——
+         init 改 async，啟動先預載 IDB 全部快取進 navMem（getCache 維持同步、
+         未命中＝新資產），並一次性搬遷 localStorage 舊快取後移除以釋放配額；
+         IDB 開啟失敗（隱私模式等）自動退回原 localStorage 流程。持倉/設定/匯率
+         仍存 localStorage 不變。匯入備份的 navCaches 直接進記憶體＋IDB。
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
@@ -1517,10 +1523,83 @@ async function ensureFx(h){
   return (c && c.rate) || fxFallbackRate(cur); // 失敗時用舊匯率；全無快取才以 1 估算並提醒
 }
 
+/* ---------------- NAV 快取儲存層（IndexedDB 為主，localStorage 後備） ----------------
+   淨值快取是最大宗資料（每檔上限 MAX_HIST 點、約 240KB JSON），localStorage 5MB
+   配額十幾檔全歷史就會滿。改存 IndexedDB（配額以 GB 計）；開啟失敗（隱私模式等）
+   時退回原本 localStorage 流程。啟動時把所有快取預載進 navMem，getCache 維持同步。 */
+const IDB_NAME = "fund_tracker";
+const IDB_STORE = "nav_cache";
+let idbDb = null;   // null＝IndexedDB 不可用 → 走 localStorage 後備
+function idbOpen(){
+  return new Promise(resolve=>{
+    let settled = false;
+    const finish = db => { if(!settled){ settled = true; resolve(db); } };
+    try{
+      if(!("indexedDB" in window)) return finish(null);
+      const req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = ()=>{ req.result.createObjectStore(IDB_STORE); };
+      req.onsuccess = ()=>finish(req.result);
+      req.onerror = ()=>finish(null);
+      req.onblocked = ()=>finish(null);
+      setTimeout(()=>finish(null), 3000);   // 開啟卡住時退回後備，不擋啟動
+    }catch(e){ finish(null); }
+  });
+}
+function idbGetAllEntries(){
+  return new Promise(resolve=>{
+    try{
+      const store = idbDb.transaction(IDB_STORE,"readonly").objectStore(IDB_STORE);
+      const keysReq = store.getAllKeys();
+      const valsReq = store.getAll();
+      let keys=null, vals=null;
+      const done = ()=>{ if(keys && vals) resolve(keys.map((k,i)=>[k, vals[i]])); };
+      keysReq.onsuccess = ()=>{ keys = keysReq.result; done(); };
+      valsReq.onsuccess = ()=>{ vals = valsReq.result; done(); };
+      keysReq.onerror = valsReq.onerror = ()=>resolve([]);
+    }catch(e){ resolve([]); }
+  });
+}
+function navStoreSave(cache){
+  if(!idbDb){ lsSet(navKey(cache.fundCode), cache); return; }
+  try{
+    const tx = idbDb.transaction(IDB_STORE,"readwrite");
+    tx.objectStore(IDB_STORE).put(cache, cache.fundCode);
+    tx.onerror = ()=>{ console.warn(`IndexedDB 寫入失敗，改存 localStorage：${cache.fundCode}`, tx.error); lsSet(navKey(cache.fundCode), cache); };
+  }catch(e){ lsSet(navKey(cache.fundCode), cache); }
+}
+function navStoreDelete(fundCode){
+  try{ localStorage.removeItem(navKey(fundCode)); }catch(e){}
+  if(!idbDb) return;
+  try{ idbDb.transaction(IDB_STORE,"readwrite").objectStore(IDB_STORE).delete(fundCode); }
+  catch(e){ console.warn(`IndexedDB 刪除失敗：${fundCode}`, e); }
+}
+async function initNavStore(){
+  idbDb = await idbOpen();
+  if(!idbDb) return;
+  (await idbGetAllEntries()).forEach(([code,cache])=>{
+    if(cache && Array.isArray(cache.navHistory)) navMem[code] = cache;
+  });
+  // 一次性搬遷：localStorage 舊快取 → IndexedDB，搬完移除以釋放 5MB 配額
+  for(let i=localStorage.length-1; i>=0; i--){
+    const key = localStorage.key(i);
+    if(!key || !key.startsWith(NAV_PREFIX)) continue;
+    const code = key.slice(NAV_PREFIX.length);
+    if(!navMem[code]){
+      const cache = lsGet(key, null);
+      if(cache && Array.isArray(cache.navHistory)){ navMem[code] = cache; navStoreSave(cache); }
+    }
+    try{ localStorage.removeItem(key); }catch(e){}
+  }
+}
+
 /* ---------------- NAV 快取 ---------------- */
 function navKey(id){ return NAV_PREFIX + id; }
 function getCache(h){
-  if(!navMem[h.fundCode]) navMem[h.fundCode] = lsGet(navKey(h.fundCode), {fundCode:h.fundCode, lastUpdated:null, navHistory:[]});
+  if(!navMem[h.fundCode]){
+    navMem[h.fundCode] = idbDb
+      ? {fundCode:h.fundCode, lastUpdated:null, navHistory:[]}   // IDB 模式啟動已預載，未命中＝新資產
+      : lsGet(navKey(h.fundCode), {fundCode:h.fundCode, lastUpdated:null, navHistory:[]});
+  }
   return navMem[h.fundCode];
 }
 function mergeHistory(h, list, source=null){
@@ -1533,7 +1612,7 @@ function mergeHistory(h, list, source=null){
   if(c.navHistory.length>MAX_HIST) c.navHistory = c.navHistory.slice(-MAX_HIST);
   c.lastUpdated = new Date().toISOString();
   if(source) c.source = source;
-  lsSet(navKey(h.fundCode), c);
+  navStoreSave(c);
 }
 
 /* ---------------- 定期定額排程 ---------------- */
@@ -2845,7 +2924,7 @@ function doImport(file){
           const key = impStr(k,64).trim();
           if(!key || !holdings.some(h=>h.fundCode===key)) return;
           const cache = sanitizeImportedNavCache(key, v);
-          if(cache) lsSet(NAV_PREFIX+key, cache);
+          if(cache){ navMem[key] = cache; navStoreSave(cache); }   // 直接進記憶體＋IDB（IDB 模式下 getCache 不再回讀 localStorage）
         });
       }
       selectedId = holdings.length?holdings[0].id:null;
@@ -3413,8 +3492,7 @@ $("#tbody").onclick = e=>{
     if(btn.dataset.act==="del"){
       if(confirm(`確定刪除「${h.fundName}」及其所有交易記錄？`)){
         holdings = holdings.filter(x=>x.id!==id);
-        try{ localStorage.removeItem(NAV_PREFIX+h.fundCode); }
-        catch(error){ console.warn(`刪除快取失敗：${h.fundCode}`,error); }
+        navStoreDelete(h.fundCode);
         compareFundIds = compareFundIds.filter(value=>value!==id);
         persistMarketSettings();
         if(selectedId===id) selectedId = holdings.length?holdings[0].id:null;
@@ -3796,10 +3874,11 @@ window.addEventListener("resize", ()=>{ if(chart) chart.resize(); });
 })();
 
 /* ---------------- 啟動 ---------------- */
-(function init(){
+(async function init(){
   document.body.dataset.theme = settings.theme||"light";
   applyGainLossColors();
   applyPrivacy();
+  await initNavStore();   // 預載 IndexedDB 快取（含 localStorage 一次性搬遷），之後 getCache 全走記憶體
   compareFundIds = compareFundIds.filter(id=>holdings.some(h=>h.id===id)).slice(0,MAX_COMPARE);
   marketSelection = marketSelection.filter(symbol=>MARKET_INDICES.some(item=>item.symbol===symbol)).slice(0,MAX_COMPARE);
   while(compareSelectionCount()>MAX_COMPARE) marketSelection.pop();
