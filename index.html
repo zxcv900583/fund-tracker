@@ -3,39 +3,43 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#1a2332">
+<meta name="theme-color" content="#101820">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>基金追蹤</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js" integrity="sha384-XcdcwHqIPULERb2yDEM4R0XaQKU3YnDsrTmjACBZyfdVVqjh6xQ4/DCMd7XLcA6Y" crossorigin="anonymous"></script>
 <style>
 :root{
-  --bg:#f4f6f9; --panel:#ffffff; --panel2:#eef1f5; --border:#d8dee8;
-  --text:#1c2430; --muted:#6b7686; --accent:#2563eb;
-  --up:#16a34a; --down:#dc2626; --flat:#6b7686;
-  --rsp:#f59e0b; --lump:#3b82f6;
-  --sel:#dbe7ff; --hover:#edf2fa;
+  --bg:#eff2f4; --panel:#ffffff; --panel2:#e9edf0; --border:#d5dde3;
+  --text:#16232d; --muted:#5f7280; --accent:#0e7490;
+  --up:#128a44; --down:#c93a3a; --flat:#5f7280;
+  --ok:#128a44;                       /* 交易時段等「狀態」色：不隨漲跌對調變動 */
+  --rsp:#b45309; --lump:#3b82f6;
+  --sel:#dbeef3; --hover:#edf3f5;
 }
 [data-theme="dark"]{
-  --bg:#0f1622; --panel:#1a2332; --panel2:#141c29; --border:#2a3850;
-  --text:#e4eaf3; --muted:#8b99ad; --accent:#4f8cff;
-  --up:#22c55e; --down:#ef4444; --flat:#8b99ad;
-  --sel:#24395e; --hover:#202d44;
+  --bg:#0a1014; --panel:#101820; --panel2:#0c1319; --border:#223038;
+  --text:#e6edf2; --muted:#8ca0ad; --accent:#37b5ce;
+  --up:#34c063; --down:#f0605d; --flat:#8ca0ad;
+  --ok:#34c063;
+  --sel:#173a44; --hover:#16222c;
 }
-[data-color-swap="true"]{--up:#dc2626;--down:#16a34a}
-[data-theme="dark"][data-color-swap="true"]{--up:#ef4444;--down:#22c55e}
+[data-color-swap="true"]{--up:#c93a3a;--down:#128a44}
+[data-theme="dark"][data-color-swap="true"]{--up:#f0605d;--down:#34c063}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{min-height:100vh}
-body{font-family:"Segoe UI","Microsoft JhengHei",system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;display:flex;flex-direction:column}
+body{font-family:"Segoe UI","PingFang TC","Microsoft JhengHei","Noto Sans TC",system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;display:flex;flex-direction:column}
 button{font-family:inherit;cursor:pointer}
+button:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 /* ===== Header ===== */
 header{background:var(--panel);border-bottom:1px solid var(--border);padding:8px 14px;flex:none}
 .hd-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .hd-top h1{font-size:17px;font-weight:700;margin-right:4px}
 .hd-top .spacer{flex:1}
 .action-dock,.utility-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.btn{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:7px 12px;font-size:13px;white-space:nowrap;min-height:34px}
+.btn{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:7px 12px;font-size:13px;white-space:nowrap;min-height:34px;transition:background .15s,border-color .15s}
 .btn:hover{background:var(--hover)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+[data-theme="dark"] .btn.primary{color:#06272e}   /* 深色 accent 偏亮，改深墨字保持對比 */
 .btn.toggle-on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
 .btn:disabled{opacity:.5;cursor:default}
 .btn-label{margin-left:3px}
@@ -44,17 +48,22 @@ header{background:var(--panel);border-bottom:1px solid var(--border);padding:8px
 .sum-item{display:flex;flex-direction:column;min-width:100px}
 .sum-item .lbl{font-size:11px;color:var(--muted)}
 .sum-item .val{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
+/* 總損益是全頁視覺錨點：字級最大＋2px 漲跌頂線（跟隨 --up/--down，自動支援漲跌對調與深色） */
+.sum-item:has(#sumPL){border-top:2px solid var(--flat);padding-top:4px}
+.sum-item:has(#sumPL.pos){border-top-color:var(--up)}
+.sum-item:has(#sumPL.neg){border-top-color:var(--down)}
+#sumPL{font-size:21px;line-height:1.15}
 .pos{color:var(--up)} .neg{color:var(--down)} .flat{color:var(--flat)}
 #updStatus{font-size:11px;color:var(--muted);margin-left:auto;align-self:flex-end}
 /* ===== Table ===== */
 #tableWrap{flex:none;max-height:46vh;overflow:auto;background:var(--panel);min-height:140px}
 table{width:100%;border-collapse:collapse;white-space:nowrap}
-thead th{position:sticky;top:0;background:var(--panel2);border-bottom:1px solid var(--border);padding:8px 10px;font-size:13px;color:var(--muted);font-weight:600;cursor:pointer;user-select:none;z-index:2;text-align:right}
+thead th{position:sticky;top:0;background:var(--panel2);border-bottom:1px solid var(--border);box-shadow:0 2px 4px -2px rgba(0,0,0,.18);padding:8px 10px;font-size:13px;color:var(--muted);font-weight:600;cursor:pointer;user-select:none;z-index:2;text-align:right}
 thead th:first-child{text-align:left}
 thead th .arr{font-size:9px}
 tbody td{padding:8px 10px;border-bottom:1px solid var(--border);text-align:right;font-size:14px;font-variant-numeric:tabular-nums}
 tbody td:first-child{text-align:left;max-width:240px;overflow:hidden;text-overflow:ellipsis}
-tbody tr{cursor:pointer}
+tbody tr{cursor:pointer;transition:background .12s}
 tbody tr:hover{background:var(--hover)}
 tbody tr.sel{background:var(--sel)}
 .unitsCell{text-decoration:underline dotted;text-underline-offset:3px}
@@ -64,8 +73,9 @@ tbody tr.sel{background:var(--sel)}
 .current-price{display:block;font-size:17px;font-weight:800;line-height:1.2}
 .price-meta{display:block;font-size:11px;color:var(--muted);margin-top:3px;font-weight:500}
 .session-label{display:inline-block;border-radius:999px;padding:1px 6px;font-size:10px;font-weight:700;background:var(--panel2);color:var(--muted)}
-.session-label.open{background:#dcfce7;color:#15803d}
-.session-label.closed{background:#fee2e2;color:#b91c1c}
+/* 交易中＝狀態綠（--ok 不隨漲跌對調）；休市＝中性灰，深淺色主題皆自動正確 */
+.session-label.open{background:color-mix(in srgb,var(--ok) 15%,var(--panel));color:var(--ok)}
+.session-label.closed{background:color-mix(in srgb,var(--muted) 16%,var(--panel));color:var(--muted)}
 .subTxt{font-size:11px;color:var(--muted)}
 #emptyHint{padding:34px;text-align:center;color:var(--muted)}
 #emptyHint .big{font-size:15px;margin-bottom:8px}
@@ -78,6 +88,7 @@ tbody tr.sel{background:var(--sel)}
 .tabs{display:flex;gap:4px;flex-wrap:wrap}
 .tab{border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:13px;border-radius:6px;padding:5px 9px;min-height:32px}
 .tab.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+[data-theme="dark"] .tab.on{color:#06272e}
 .tab:disabled{opacity:.35;cursor:default}
 #chartWrap{flex:1;position:relative;padding:4px 8px 2px}
 #chartCanvas{position:absolute;inset:4px 8px 2px}
@@ -124,9 +135,13 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
 #csvPrev select{padding:3px 5px;font-size:12px;max-width:240px;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:4px}
 .st-ok{color:var(--up)} .st-dup{color:var(--muted)} .st-err{color:var(--down)}
 .totRow{font-weight:700}
-.badge{font-size:10px;border-radius:4px;padding:1px 5px;color:#fff;display:inline-block}
-.badge.RSP{background:var(--rsp)} .badge.LUMP{background:var(--lump)} .badge.FUND{background:#7c3aed}
-.badge.WATCH{background:var(--lump)} .badge.CLOSED{background:var(--muted)}
+/* badge 改描邊 chip：把「彩色」留給漲跌數字，降低表格彩色噪音 */
+.badge{font-size:10px;border-radius:4px;padding:1px 5px;display:inline-block;background:transparent;border:1px solid var(--border);color:var(--muted)}
+.badge.RSP{color:var(--rsp);border-color:color-mix(in srgb,var(--rsp) 45%,var(--panel))}
+.badge.LUMP{color:var(--lump);border-color:color-mix(in srgb,var(--lump) 45%,var(--panel))}
+.badge.FUND{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--panel))}
+.badge.WATCH{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,var(--panel))}
+.badge.CLOSED{color:var(--muted)}
 /* 隱私模式：碼住金額（純視覺，不改數值） */
 .priv-blur{filter:blur(7px);transition:filter .15s;cursor:default}
 body[data-private="true"] .summary .val,
@@ -165,7 +180,10 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
 @keyframes sp{to{transform:rotate(360deg)}}
 /* ===== 全球市場 ===== */
 #marketBar{flex:none;display:flex;align-items:stretch;overflow-x:auto;background:var(--panel);border-bottom:1px solid var(--border);scrollbar-width:thin}
-.market-item{min-width:122px;padding:7px 10px;border:0;border-right:1px solid var(--border);background:transparent;color:var(--text);text-align:left}
+.market-item{min-width:122px;padding:7px 10px;border:0;border-right:1px solid var(--border);border-top:2px solid transparent;background:transparent;color:var(--text);text-align:left;transition:background .15s}
+/* 簽名元素：市場卡片 2px 漲跌頂線——掃一眼色帶即知全球紅綠（跟隨漲跌對調） */
+.market-item:has(.market-price.pos){border-top-color:var(--up)}
+.market-item:has(.market-price.neg){border-top-color:var(--down)}
 .market-item:hover{background:var(--hover)}
 .market-name{display:block;font-size:11px;color:var(--muted);font-weight:700}
 .market-price{display:block;font-size:16px;font-weight:800;font-variant-numeric:tabular-nums}
@@ -694,6 +712,13 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
          與 v1.17 savePur 驗證一致。③匯入設定白名單補 privacyMode，匯入後即時重套
          主題/漲跌色/隱私模式。④外幣匯率查詢失敗且無快取時以 1:1 估算——toast 提醒
          （每幣別一次），不再默默失真。
+   v1.26 UI 換膚「終端紀律」（純 CSS token，不動 JS 邏輯）：①配色收斂——accent 改墨青
+         （淺 #0e7490／深 #37b5ce）、新增 --ok 狀態色（不隨漲跌對調）；②數字階層——
+         總損益 #sumPL 放大為視覺錨點＋2px 漲跌頂線（:has 實作）；③簽名元素——市場
+         卡片 2px 漲跌頂線；④session-label 改用 color-mix 吃變數，修正深色模式寫死
+         亮色塊；⑤badge 全改描邊 chip，彩色留給漲跌；⑥字體堆疊補 PingFang/Noto、
+         focus-visible 焦點環、表頭 sticky 陰影、hover 過渡；⑦theme-color 與 PWA
+         manifest 色票同步新深色。深色 accent 偏亮，primary 鈕/tab.on 改深墨字。
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
@@ -3756,8 +3781,8 @@ window.addEventListener("resize", ()=>{ if(chart) chart.resize(); });
 (function(){
   try{
     const manifest = {name:"基金追蹤", short_name:"基金追蹤", start_url:".", display:"standalone",
-      background_color:"#0f1622", theme_color:"#1a2332",
-      icons:[{src:"data:image/svg+xml,"+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="20" fill="#1a2332"/><text x="50" y="68" font-size="52" text-anchor="middle">📈</text></svg>'), sizes:"any", type:"image/svg+xml"}]};
+      background_color:"#0a1014", theme_color:"#101820",
+      icons:[{src:"data:image/svg+xml,"+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="20" fill="#101820"/><text x="50" y="68" font-size="52" text-anchor="middle">📈</text></svg>'), sizes:"any", type:"image/svg+xml"}]};
     const link = document.createElement("link");
     link.rel="manifest";
     link.href="data:application/manifest+json,"+encodeURIComponent(JSON.stringify(manifest));
