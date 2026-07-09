@@ -9,43 +9,49 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js" integrity="sha384-XcdcwHqIPULERb2yDEM4R0XaQKU3YnDsrTmjACBZyfdVVqjh6xQ4/DCMd7XLcA6Y" crossorigin="anonymous"></script>
 <style>
 :root{
-  --bg:#eff2f4; --panel:#ffffff; --panel2:#e9edf0; --border:#d5dde3;
+  --bg:#e7edf1; --panel:#ffffff; --panel2:#eaeff3; --border:#d5dde3;
   --text:#16232d; --muted:#5f7280; --accent:#0e7490;
   --up:#128a44; --down:#c93a3a; --flat:#5f7280;
   --ok:#128a44;                       /* 交易時段等「狀態」色：不隨漲跌對調變動 */
   --rsp:#b45309; --lump:#3b82f6;
   --sel:#dbeef3; --hover:#edf3f5;
+  /* 立體層次：畫布(--bg) < 卡片(--panel＋shadow-sm) < 色帶/磚(--panel2 或淡染) */
+  --shadow-sm:0 1px 2px rgba(23,32,42,.05),0 2px 10px rgba(23,32,42,.07);
+  --shadow-md:0 4px 12px rgba(23,32,42,.10),0 14px 36px rgba(23,32,42,.16);
 }
 [data-theme="dark"]{
-  --bg:#0a1014; --panel:#101820; --panel2:#0c1319; --border:#223038;
+  --bg:#070b0f; --panel:#101820; --panel2:#0c1319; --border:#233340;
   --text:#e6edf2; --muted:#8ca0ad; --accent:#37b5ce;
   --up:#34c063; --down:#f0605d; --flat:#8ca0ad;
   --ok:#34c063;
   --sel:#173a44; --hover:#16222c;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.5),0 3px 12px rgba(0,0,0,.38);
+  --shadow-md:0 6px 16px rgba(0,0,0,.5),0 18px 44px rgba(0,0,0,.42);
 }
 [data-color-swap="true"]{--up:#c93a3a;--down:#128a44}
 [data-theme="dark"][data-color-swap="true"]{--up:#f0605d;--down:#34c063}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{min-height:100vh}
-body{font-family:"Segoe UI","PingFang TC","Microsoft JhengHei","Noto Sans TC",system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;display:flex;flex-direction:column}
+body{font-family:"Segoe UI","PingFang TC","Microsoft JhengHei","Noto Sans TC",system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;display:flex;flex-direction:column;padding:10px;gap:10px}
 button{font-family:inherit;cursor:pointer}
 button:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 /* ===== Header ===== */
-header{background:var(--panel);border-bottom:1px solid var(--border);padding:8px 14px;flex:none}
+header{background:var(--panel);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-sm);padding:8px 14px;flex:none}
 .hd-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .hd-top h1{font-size:17px;font-weight:700;margin-right:4px}
 .hd-top .spacer{flex:1}
 .action-dock,.utility-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .btn{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:7px 12px;font-size:13px;white-space:nowrap;min-height:34px;transition:background .15s,border-color .15s}
 .btn:hover{background:var(--hover)}
-.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:var(--shadow-sm)}
 [data-theme="dark"] .btn.primary{color:#06272e}   /* 深色 accent 偏亮，改深墨字保持對比 */
 .btn.toggle-on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
 .btn:disabled{opacity:.5;cursor:default}
 .btn-label{margin-left:3px}
 .color-swap-icon{font-weight:800;letter-spacing:-1px}
-.summary{display:flex;gap:18px;margin-top:7px;flex-wrap:wrap}
-.sum-item{display:flex;flex-direction:column;min-width:100px}
+/* 摘要色帶（淡墨青染）上鋪白色數字磚：畫布→卡片→色帶→磚 四層立體感 */
+.summary{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;background:color-mix(in srgb,var(--accent) 6%,var(--panel2));border-radius:10px;padding:8px}
+.sum-item{display:flex;flex-direction:column;min-width:108px;background:var(--panel);border-radius:8px;padding:6px 10px;box-shadow:var(--shadow-sm)}
 .sum-item .lbl{font-size:11px;color:var(--muted)}
 .sum-item .val{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
 /* 總損益是全頁視覺錨點：字級最大＋2px 漲跌頂線（跟隨 --up/--down，自動支援漲跌對調與深色） */
@@ -56,7 +62,7 @@ header{background:var(--panel);border-bottom:1px solid var(--border);padding:8px
 .pos{color:var(--up)} .neg{color:var(--down)} .flat{color:var(--flat)}
 #updStatus{font-size:11px;color:var(--muted);margin-left:auto;align-self:flex-end}
 /* ===== Table ===== */
-#tableWrap{flex:none;max-height:46vh;overflow:auto;background:var(--panel);min-height:140px}
+#tableWrap{flex:none;max-height:46vh;overflow:auto;background:var(--panel);min-height:140px;border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-sm)}
 table{width:100%;border-collapse:collapse;white-space:nowrap}
 thead th{position:sticky;top:0;background:var(--panel2);border-bottom:1px solid var(--border);box-shadow:0 2px 4px -2px rgba(0,0,0,.18);padding:8px 10px;font-size:13px;color:var(--muted);font-weight:600;cursor:pointer;user-select:none;z-index:2;text-align:right}
 thead th:first-child{text-align:left}
@@ -81,7 +87,7 @@ tbody tr.sel{background:var(--sel)}
 #emptyHint .big{font-size:15px;margin-bottom:8px}
 .empty-actions{display:flex;gap:8px;justify-content:center;margin-top:16px;flex-wrap:wrap}
 /* ===== Chart area ===== */
-#chartArea{flex:1 1 auto;display:flex;flex-direction:column;background:var(--panel);border-top:2px solid var(--border);min-height:62vh}
+#chartArea{flex:1 1 auto;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-sm);overflow:hidden;min-height:62vh}
 #chartBar{display:flex;align-items:center;gap:6px;padding:8px 10px;flex-wrap:wrap;border-bottom:1px solid var(--border)}
 .chart-actions{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
 .range-select{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:7px 10px;font-size:13px;font-family:inherit;min-height:34px;cursor:pointer;max-width:170px}
@@ -96,7 +102,7 @@ tbody tr.sel{background:var(--sel)}
 #chartHint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);pointer-events:none}
 /* ===== Status bar ===== */
 /* ===== Dialogs ===== */
-dialog{border:1px solid var(--border);border-radius:10px;background:var(--panel);color:var(--text);padding:0;max-width:min(560px,94vw);width:520px;max-height:88vh}
+dialog{border:1px solid var(--border);border-radius:12px;background:var(--panel);color:var(--text);padding:0;max-width:min(560px,94vw);width:520px;max-height:88vh;box-shadow:var(--shadow-md)}
 dialog::backdrop{background:rgba(0,0,0,.45)}
 .dlgHead{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border);font-weight:700}
 .dlgBody{padding:14px 16px;overflow:auto;max-height:64vh}
@@ -183,8 +189,8 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
 .spin{display:inline-block;width:12px;height:12px;border:2px solid var(--muted);border-top-color:transparent;border-radius:50%;animation:sp 0.8s linear infinite;vertical-align:-2px}
 @keyframes sp{to{transform:rotate(360deg)}}
 /* ===== 全球市場 ===== */
-#marketBar{flex:none;display:flex;align-items:stretch;overflow-x:auto;background:var(--panel);border-bottom:1px solid var(--border);scrollbar-width:thin}
-.market-item{min-width:122px;padding:7px 10px;border:0;border-right:1px solid var(--border);border-top:2px solid transparent;background:transparent;color:var(--text);text-align:left;transition:background .15s}
+#marketBar{flex:none;display:flex;align-items:stretch;gap:6px;overflow-x:auto;background:var(--panel);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-sm);padding:7px;scrollbar-width:thin}
+.market-item{min-width:122px;padding:6px 10px;border:0;border-top:2px solid transparent;border-radius:8px;background:var(--panel2);color:var(--text);text-align:left;transition:background .15s}
 /* 簽名元素：市場卡片 2px 漲跌頂線——掃一眼色帶即知全球紅綠（跟隨漲跌對調） */
 .market-item:has(.market-price.pos){border-top-color:var(--up)}
 .market-item:has(.market-price.neg){border-top-color:var(--down)}
@@ -193,7 +199,7 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
 .market-price{display:block;font-size:16px;font-weight:800;font-variant-numeric:tabular-nums}
 .market-change{display:block;font-size:11px;font-variant-numeric:tabular-nums}
 .market-session{display:block;margin-top:2px;font-size:10px;color:var(--muted)}
-#marketBarTools{position:sticky;left:0;z-index:3;display:flex;align-items:center;gap:6px;padding:7px 10px;min-width:max-content;background:var(--panel);border-right:1px solid var(--border)}
+#marketBarTools{position:sticky;left:0;z-index:3;display:flex;align-items:center;gap:6px;padding:7px 10px;margin-right:2px;min-width:max-content;background:var(--panel);border-right:1px solid var(--border)}
 #marketStatus{font-size:11px;color:var(--muted)}
 #fundPicker,#marketPicker{display:flex;flex-wrap:wrap;gap:5px}
 .market-pick{display:flex;align-items:center;gap:5px;padding:3px 7px;border:1px solid var(--border);border-radius:6px;background:var(--panel2);font-size:12px;cursor:pointer;white-space:nowrap}
@@ -207,7 +213,7 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
 #comparePickCount{font-weight:700;color:var(--accent)}
 /* mobile */
 @media (max-width:640px){
-  body{font-size:15px;overflow:auto;padding-bottom:76px}
+  body{font-size:15px;overflow:auto;padding:6px;padding-bottom:76px;gap:6px}
   header{padding:8px 10px}
   .hd-top{gap:7px}
   .hd-top h1{font-size:17px}
@@ -216,7 +222,7 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
   .action-dock{position:fixed;left:0;right:0;bottom:0;z-index:50;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:7px max(7px,env(safe-area-inset-right)) calc(7px + env(safe-area-inset-bottom)) max(7px,env(safe-area-inset-left));background:color-mix(in srgb,var(--panel) 94%,transparent);border-top:1px solid var(--border);box-shadow:0 -5px 18px rgba(0,0,0,.12);backdrop-filter:blur(10px)}
   .action-dock .btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:5px 2px;min-width:0;min-height:52px;font-size:17px}
   .action-dock .btn-label{display:block;margin:0;font-size:10px;line-height:1.1}
-  .summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 10px;overflow:visible;padding-bottom:2px}
+  .summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;overflow:visible;padding:6px}
   .sum-item{min-width:0}
   .sum-item .lbl{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .sum-item .val{font-size:15px;white-space:nowrap}
@@ -739,6 +745,11 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
          由 navMem 回存快取至持久層。②空狀態加行動按鈕（新增基金/股票/匯入 CSV）。
          ③「區間報酬」表頭動態標示目前區間 (#rangeColHint)。④排序偏好記憶
          （settings.sortKey/sortAsc，含匯入白名單）。
+   v1.29 卡片分層立體化（純 CSS）：回饋「配色單調、太平面」——四大區塊（header/
+         市場列/持倉表/圖表區）由貼齊平面改為畫布上的圓角卡片（12px＋--shadow-sm，
+         深淺主題各自調陰影濃度）；摘要區加淡墨青色帶（color-mix accent 6%）、
+         六個摘要數字改白色小磚；市場卡片改圓角磚（--panel2）；dialog 加
+         --shadow-md 浮起。層次：畫布 < 卡片 < 色帶 < 磚。手機 body 留邊 6px。
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
