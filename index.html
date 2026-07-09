@@ -688,6 +688,12 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
    v1.24 三項版面調整：①移除圖表下方狀態列(#statusBar：總投資/總損益/已選，與上方
          摘要重複)及其 CSS/JS。②「自訂」按鈕改名「自訂時間」。③比較面板區間 tabs
          也改為下拉選單(marketRangeSelect)，與主圖一致；onclick 改 change 委派。
+   v1.25 四項資料正確性修復：①CSV 匯入切換基金級別後，先前自動查得的淨值殘留
+         （_origNav 從未寫入）——fillCsvNavs 首次記錄 CSV 原始淨值、切換時還原重查。
+         ②JSON 備份還原丟失 0 股觀察記錄——匯入消毒放寬 units≥0（0 股不要求淨值），
+         與 v1.17 savePur 驗證一致。③匯入設定白名單補 privacyMode，匯入後即時重套
+         主題/漲跌色/隱私模式。④外幣匯率查詢失敗且無快取時以 1:1 估算——toast 提醒
+         （每幣別一次），不再默默失真。
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
@@ -1434,6 +1440,15 @@ function applyChartViewChrome(){
   $("#btnCompareView").classList.toggle("on", compare);
 }
 
+// 匯率查詢失敗且無舊快取時只能以 1:1 估算，現值與損益會失真 → 每幣別提醒一次
+const fxWarned = new Set();
+function fxFallbackRate(cur){
+  if(!fxWarned.has(cur)){
+    fxWarned.add(cur);
+    toast(`⚠ 無法取得 ${cur}/TWD 匯率，暫以 1:1 估算（TWD 現值與損益會失真）`, 4200);
+  }
+  return 1;
+}
 // 匯率（以同一基金 原幣 vs TWD 序列推算）
 async function ensureFx(h){
   const cur = h.currency;
@@ -1452,7 +1467,7 @@ async function ensureFx(h){
   }catch(error){
     console.warn(`匯率 ${cur}/TWD Yahoo 查詢失敗`,error);
   }
-  if(h.assetType==="stock") return (c && c.rate) || 1;
+  if(h.assetType==="stock") return (c && c.rate) || fxFallbackRate(cur);
   try{
     const end = todayStr(), start = addDays(end,-14);
     const [base, twd] = await Promise.all([
@@ -1474,7 +1489,7 @@ async function ensureFx(h){
   }catch(e){
     console.warn(`Morningstar 匯率推算失敗：${cur}/TWD`,e);
   }
-  return (c && c.rate) || 1; // 失敗時用舊匯率或 1
+  return (c && c.rate) || fxFallbackRate(cur); // 失敗時用舊匯率；全無快取才以 1 估算並提醒
 }
 
 /* ---------------- NAV 快取 ---------------- */
@@ -2725,8 +2740,10 @@ function sanitizeImportedHoldings(list){
       quoteType: impStr(h.quoteType,12),
       purchases: (Array.isArray(h.purchases)?h.purchases:[]).map(p=>{
         if(!p || typeof p!=="object") return null;
-        const units = impPosNum(p.units), nav = impPosNum(p.navAtPurchase);
-        if(!units || !nav || !IMP_DATE_RE.test(String(p.date||""))) return null;
+        // units 可為 0（v1.17 觀察持倉：僅追蹤走勢、成本損益為 0）；有單位數時才要求淨值 > 0
+        const units = (p.units!==null && p.units!=="" && Number.isFinite(+p.units) && +p.units>=0) ? +p.units : null;
+        const nav = impPosNum(p.navAtPurchase) || 0;
+        if(units==null || (units>0 && !(nav>0)) || !IMP_DATE_RE.test(String(p.date||""))) return null;
         return {purchaseId:uid("p"), type:(p.type==="LUMP"?"LUMP":"RSP"), date:p.date, units, navAtPurchase:nav,
           amount:impPosNum(p.amount), fee:impPosNum(p.fee)||0, note:impStr(p.note,200),
           ...(p.origin==="fundrich"?{origin:"fundrich"}:{})};
@@ -2781,8 +2798,8 @@ function doImport(file){
       if(!Array.isArray(d.holdings)) throw new Error("格式不符");
       holdings = sanitizeImportedHoldings(d.holdings); lsSet(LS_H,holdings);
       if(d.settings && typeof d.settings==="object"){
-        // 僅複製已知設定欄位，避免原型污染與垃圾欄位
-        ["defaultChartRange","currency","refreshOnOpen","theme","swapGainLossColors",
+        // 僅複製已知設定欄位，避免原型污染與垃圾欄位（新增 settings 欄位時記得同步這裡）
+        ["defaultChartRange","currency","refreshOnOpen","theme","swapGainLossColors","privacyMode",
          "marketSymbols","compareFundIds","marketRange",
          "_lastRefresh","_lastRefreshAttempt","_lastDataRefresh","_lastFundDateRange"]
           .forEach(k=>{ if(Object.prototype.hasOwnProperty.call(d.settings,k)) settings[k]=d.settings[k]; });
@@ -2816,6 +2833,9 @@ function doImport(file){
         : ["^TWII","^GSPC","^IXIC"];
       while(compareSelectionCount()>MAX_COMPARE) marketSelection.pop();
       marketRange = MARKET_RANGES.some(([,value])=>value===settings.marketRange) ? settings.marketRange : "1y";
+      document.body.dataset.theme = settings.theme;
+      applyGainLossColors();   // 匯入的漲跌色/隱私模式立即生效，不必重新整理
+      applyPrivacy();
       renderAll(); toast("匯入成功："+holdings.length+" 筆持倉");
     }catch(e){ toast("匯入失敗："+e.message); }
   };
@@ -3057,6 +3077,9 @@ async function processFundrichCsv(rows, H){
 async function fillCsvNavs(){
   const {entries, groups} = csvState;
   const st = $("#csvStatus");
+  // 首次呼叫先記下 CSV 原始淨值（可能為空）：之後切換基金級別才能還原、依新級別重查，
+  // 不會殘留前一檔基金自動查得的淨值
+  entries.forEach(e=>{ if(!("_origNav" in e)) e._origNav = (e.nav>0 ? e.nav : null); });
   for(const g of groups.values()){
     if(g.error) continue;
     const rows = entries.filter(e=>e.key===g.key && e.status!=="err");
@@ -3142,7 +3165,7 @@ function renderCsvPreview(){
       csvState.entries.forEach(e=>{
         if(e.key===g.key && (e.status==="ok"||e.status==="dup"||(e.status==="err"&&/淨值/.test(e.err)))){
           e.status="ok"; e.err=""; e.navDate=null; e.replace=false;
-          if(!e._userNav) e.nav = e._origNav ?? e.nav;
+          e.nav = e._origNav;   // 還原 CSV 原始淨值（可能為 null），讓 fillCsvNavs 依新級別重查
         }
       });
       await fillCsvNavs();
