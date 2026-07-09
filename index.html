@@ -79,6 +79,7 @@ tbody tr.sel{background:var(--sel)}
 .subTxt{font-size:11px;color:var(--muted)}
 #emptyHint{padding:34px;text-align:center;color:var(--muted)}
 #emptyHint .big{font-size:15px;margin-bottom:8px}
+.empty-actions{display:flex;gap:8px;justify-content:center;margin-top:16px;flex-wrap:wrap}
 /* ===== Chart area ===== */
 #chartArea{flex:1 1 auto;display:flex;flex-direction:column;background:var(--panel);border-top:2px solid var(--border);min-height:62vh}
 #chartBar{display:flex;align-items:center;gap:6px;padding:8px 10px;flex-wrap:wrap;border-bottom:1px solid var(--border)}
@@ -176,6 +177,9 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
 .note{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.5}
 #toast{position:fixed;bottom:46px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:8px 18px;border-radius:20px;font-size:13px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:99;max-width:90vw}
 #toast.show{opacity:.93}
+#toast.with-action{pointer-events:auto}
+#toast button{margin-left:10px;background:none;border:1px solid color-mix(in srgb,var(--bg) 55%,transparent);color:var(--bg);border-radius:6px;padding:3px 12px;font-size:13px;font-weight:700;cursor:pointer}
+#toast button:hover{background:color-mix(in srgb,var(--bg) 14%,transparent)}
 .spin{display:inline-block;width:12px;height:12px;border:2px solid var(--muted);border-top-color:transparent;border-radius:50%;animation:sp 0.8s linear infinite;vertical-align:-2px}
 @keyframes sp{to{transform:rotate(360deg)}}
 /* ===== 全球市場 ===== */
@@ -300,7 +304,7 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
       <th data-k="pl" title="含配息">損益 <span class="arr"></span></th>
       <th data-k="div" title="累計配息（計價幣別）">配息 <span class="arr"></span></th>
       <th data-k="plPct" title="（現值＋配息－成本）/ 成本">報酬率 <span class="arr"></span></th>
-      <th data-k="rangePct">區間報酬 <span class="arr"></span></th>
+      <th data-k="rangePct" title="依上方選擇的時間區間計算">區間報酬<span class="subTxt" id="rangeColHint"></span> <span class="arr"></span></th>
       <th>操作</th>
     </tr></thead>
     <tbody id="tbody"></tbody>
@@ -308,6 +312,11 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
   <div id="emptyHint" hidden>
     <div class="big">尚未加入任何資產</div>
     <div>可新增投信基金，或用股票代碼加入股票／ETF</div>
+    <div class="empty-actions">
+      <button class="btn primary" id="emptyAddFund">＋ 新增基金</button>
+      <button class="btn primary" id="emptyAddStock">＋ 股票 / ETF</button>
+      <button class="btn" id="emptyCsv">📂 匯入基富通 CSV</button>
+    </div>
   </div>
 </div>
 
@@ -725,6 +734,11 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
          未命中＝新資產），並一次性搬遷 localStorage 舊快取後移除以釋放配額；
          IDB 開啟失敗（隱私模式等）自動退回原 localStorage 流程。持倉/設定/匯率
          仍存 localStorage 不變。匯入備份的 navCaches 直接進記憶體＋IDB。
+   v1.28 UX 小改動包（四項人性化）：①刪除持倉改「立即刪＋6 秒可復原」toast
+         （toastAction 帶按鈕），取代原生 confirm——保護手滑而非增加確認；復原時
+         由 navMem 回存快取至持久層。②空狀態加行動按鈕（新增基金/股票/匯入 CSV）。
+         ③「區間報酬」表頭動態標示目前區間 (#rangeColHint)。④排序偏好記憶
+         （settings.sortKey/sortAsc，含匯入白名單）。
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
@@ -787,7 +801,16 @@ function lsGet(k, d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(
 function lsSet(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){ console.error(`儲存本機資料失敗：${k}`,e); toast("⚠ 儲存失敗（localStorage 可能已滿）"); } }
 
 let toastTimer=null;
-function toast(msg, ms=2600){ const t=$("#toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove("show"), ms); }
+function toast(msg, ms=2600){ const t=$("#toast"); t.textContent=msg; t.classList.remove("with-action"); t.classList.add("show"); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove("show"), ms); }
+// 帶動作按鈕的 toast（如刪除後「復原」）：按下執行 fn 並收起；逾時自動收起
+function toastAction(msg, label, fn, ms=6000){
+  const t = $("#toast");
+  t.innerHTML = esc(msg) + `<button type="button" id="toastActionBtn">${esc(label)}</button>`;
+  t.classList.add("show","with-action");
+  $("#toastActionBtn").onclick = ()=>{ clearTimeout(toastTimer); t.classList.remove("show","with-action"); fn(); };
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>t.classList.remove("show","with-action"), ms);
+}
 
 /* ---------------- 狀態 ---------------- */
 let holdings = lsGet(LS_H, []);
@@ -812,7 +835,9 @@ let selectedId = null;
 let curRange = settings.defaultChartRange || "3M";
 let customRange = null;            // {start,end}
 let chartMode = "pct";             // pct | nav
-let sortKey = null, sortAsc = true;
+const SORT_KEYS = ["name","nav","dayChg","units","cost","value","pl","div","plPct","rangePct"];
+let sortKey = SORT_KEYS.includes(settings.sortKey) ? settings.sortKey : null;   // 記憶上次排序
+let sortAsc = settings.sortAsc !== false;
 let chart = null;                  // 主圖（基金/股票、組合、比較共用同一個 canvas）
 let allocChart = null;             // 資產配置圓餅圖（獨立彈窗，與主圖無關）
 let marketCache = lsGet(LS_MARKET_CACHE, {quotes:{}, fetchedAt:null});
@@ -2011,6 +2036,8 @@ function renderHeader(){
 function renderTable(){
   const tb = $("#tbody");
   $("#emptyHint").hidden = holdings.length>0;
+  const rangeHint = $("#rangeColHint");
+  if(rangeHint) rangeHint.textContent = `(${curRange})`;   // 標明此欄依哪個時間區間計算
   let rows = holdings.map(rowData);
   if(sortKey){
     rows.sort((a,b)=>{
@@ -2904,7 +2931,7 @@ function doImport(file){
       if(d.settings && typeof d.settings==="object"){
         // 僅複製已知設定欄位，避免原型污染與垃圾欄位（新增 settings 欄位時記得同步這裡）
         ["defaultChartRange","currency","refreshOnOpen","theme","swapGainLossColors","privacyMode",
-         "marketSymbols","compareFundIds","marketRange",
+         "sortKey","sortAsc","marketSymbols","compareFundIds","marketRange",
          "_lastRefresh","_lastRefreshAttempt","_lastDataRefresh","_lastFundDateRange"]
           .forEach(k=>{ if(Object.prototype.hasOwnProperty.call(d.settings,k)) settings[k]=d.settings[k]; });
         settings.theme = d.settings.theme==="dark" ? "dark" : "light";
@@ -3378,6 +3405,9 @@ $("#btnExport").onclick = doExport;
 $("#btnImport").onclick = ()=>$("#importFile").click();
 $("#importFile").onchange = e=>{ if(e.target.files[0]) doImport(e.target.files[0]); e.target.value=""; };
 $("#btnCsv").onclick = openCsv;
+$("#emptyAddFund").onclick = openAdd;      // 空狀態的行動出口：不用回頭找工具列
+$("#emptyAddStock").onclick = openStock;
+$("#emptyCsv").onclick = openCsv;
 $("#btnColorSwap").onclick = ()=>{
   settings.swapGainLossColors = !settings.swapGainLossColors;
   applyGainLossColors();
@@ -3490,14 +3520,25 @@ $("#tbody").onclick = e=>{
   if(btn){
     const id = btn.dataset.id, h = holdings.find(x=>x.id===id);
     if(btn.dataset.act==="del"){
-      if(confirm(`確定刪除「${h.fundName}」及其所有交易記錄？`)){
-        holdings = holdings.filter(x=>x.id!==id);
-        navStoreDelete(h.fundCode);
-        compareFundIds = compareFundIds.filter(value=>value!==id);
+      // 立即刪除＋6 秒可復原（比確認框更能保護手滑）：navMem 仍留有快取，復原時回存
+      const index = holdings.findIndex(x=>x.id===id);
+      const wasCompared = compareFundIds.includes(id);
+      const prevSelected = selectedId;
+      holdings = holdings.filter(x=>x.id!==id);
+      navStoreDelete(h.fundCode);
+      compareFundIds = compareFundIds.filter(value=>value!==id);
+      persistMarketSettings();
+      if(selectedId===id) selectedId = holdings.length?holdings[0].id:null;
+      lsSet(LS_H,holdings); renderAll();
+      toastAction(`已刪除「${h.fundName}」`, "復原", ()=>{
+        holdings.splice(Math.min(index,holdings.length), 0, h);
+        if(navMem[h.fundCode]) navStoreSave(navMem[h.fundCode]);   // 快取回存持久層
+        if(wasCompared && !compareFundIds.includes(id)) compareFundIds.push(id);
         persistMarketSettings();
-        if(selectedId===id) selectedId = holdings.length?holdings[0].id:null;
+        selectedId = prevSelected;
         lsSet(LS_H,holdings); renderAll();
-      }
+        toast(`已復原「${h.fundName}」`);
+      });
     }else if(btn.dataset.act==="mng"){ openMng(id); }
     else if(btn.dataset.act==="buy"){ openMng(id); openPurEdit(null); }
     else if(btn.dataset.act==="cmp"){ enterCompareView(null,id); }
@@ -3519,6 +3560,7 @@ document.querySelectorAll("thead th[data-k]").forEach(th=>{
   th.onclick = ()=>{
     const k = th.dataset.k;
     if(sortKey===k) sortAsc=!sortAsc; else { sortKey=k; sortAsc=true; }
+    settings.sortKey = sortKey; settings.sortAsc = sortAsc; lsSet(LS_S,settings);   // 記憶排序偏好
     renderTable();
   };
 });
