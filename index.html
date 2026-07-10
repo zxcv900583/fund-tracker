@@ -233,10 +233,12 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
   .action-dock{position:fixed;left:0;right:0;bottom:0;z-index:50;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:7px max(7px,env(safe-area-inset-right)) calc(7px + env(safe-area-inset-bottom)) max(7px,env(safe-area-inset-left));background:color-mix(in srgb,var(--panel) 94%,transparent);border-top:1px solid var(--border);box-shadow:0 -5px 18px rgba(0,0,0,.12);backdrop-filter:blur(10px)}
   .action-dock .btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:5px 2px;min-width:0;min-height:52px;font-size:17px}
   .action-dock .btn-label{display:block;margin:0;font-size:10px;line-height:1.1}
-  .summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;overflow:visible;padding:6px}
+  /* 2 欄而非 3 欄：每磚約 170px，金額到八位數也不會撐出磚外被切掉 */
+  .summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;overflow:visible;padding:6px}
   .sum-item{min-width:0}
   .sum-item .lbl{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .sum-item .val{font-size:15px;white-space:nowrap}
+  #sumPL{font-size:19px}
   #updStatus{grid-column:1/-1;min-width:0;margin-left:0;font-size:11px;line-height:1.45}
   #marketBar{min-height:82px}
   #marketBarTools{display:none}
@@ -783,6 +785,10 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
          不再提醒（「先不要」則下次仍提醒）；管理彈窗「🔍 偵測除息」可重新
          偵測含已略過項。匯入備份保留 divDismissed（格式驗證）。觀察持倉
          （除息時 0 股）不提示。記錄日期為除息日並註記於備註。
+   v1.31 手機摘要磚溢出修正：v1.29 摘要改磚後，手機 3 欄格線每磚僅約 110px，
+         總損益（21px、不換行）金額較大即撐出磚外被切。改 2 欄（每磚約 170px，
+         實測 +NT$ 13,175,000 八位數可容納）、#sumPL 手機字級 21→19px；
+         桌面 flex 版面與字級不變。
    ================================================================ */
 
 /* ---------------- 常數 / 工具 ---------------- */
