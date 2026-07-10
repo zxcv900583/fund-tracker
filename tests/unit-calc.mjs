@@ -61,6 +61,8 @@ const source = [
   extractConst("isIsin"),
   extractFunction("xirr"),
   extractFunction("positionOf"),
+  extractFunction("unitsOnDate"),
+  extractFunction("detectStockDividends"),
   extractFunction("schedDateFor"),
   extractFunction("nextSched"),
   extractFunction("findNavInList"),
@@ -74,7 +76,7 @@ const source = [
   extractFunction("sanitizeImportedNavCache"),
 ].join("\n");
 
-const lib = new Function(`"use strict";\n${source}\nreturn {xirr, positionOf, schedDateFor, nextSched, findNavInList, navOnOrBefore, cleanPrice, cleanAmount, csvNormType, csvNormDate, parseCsv, sanitizeImportedHoldings, sanitizeImportedNavCache, purCost, addDays};`)();
+const lib = new Function(`"use strict";\n${source}\nreturn {xirr, positionOf, unitsOnDate, detectStockDividends, schedDateFor, nextSched, findNavInList, navOnOrBefore, cleanPrice, cleanAmount, csvNormType, csvNormDate, parseCsv, sanitizeImportedHoldings, sanitizeImportedNavCache, purCost, addDays};`)();
 
 let passed = 0;
 function check(name, fn) {
@@ -151,6 +153,51 @@ check("positionOf 空持倉", () => {
   assert.equal(p.held, 0);
   assert.equal(p.avgCost, null);
   assert.equal(p.grossInvested, 0);
+});
+
+/* ---------------- 股票除息偵測（v1.30） ---------------- */
+check("unitsOnDate 除息日前持股回放", () => {
+  const h = {
+    purchases: [{ date: "2026-01-05", units: 100 }, { date: "2026-03-10", units: 50 }],
+    sells: [{ date: "2026-02-01", units: 30 }],
+  };
+  assert.equal(lib.unitsOnDate(h, "2026-01-05"), 0);      // 除息日當天買進不算
+  assert.equal(lib.unitsOnDate(h, "2026-01-06"), 100);
+  assert.equal(lib.unitsOnDate(h, "2026-02-02"), 70);
+  assert.equal(lib.unitsOnDate(h, "2026-03-11"), 120);
+  assert.equal(lib.unitsOnDate({ purchases: [{ date: "2026-01-05", units: 5 }], sells: [{ date: "2026-01-06", units: 99 }] }, "2026-01-07"), 0);  // 賣超夾擠
+});
+check("detectStockDividends 狀態分類與稅估", () => {
+  const h = {
+    assetType: "stock", currency: "USD",
+    purchases: [{ date: "2025-01-01", units: 10 }], sells: [],
+    dividends: [{ date: "2025-07-01", amount: 5 }],
+    divDismissed: ["2025-10-01|0.5"],
+  };
+  const out = lib.detectStockDividends(h, [
+    { date: "2025-07-01", perShare: 0.5 },     // 同日已有記錄 → dup
+    { date: "2025-10-01", perShare: 0.5 },     // 已略過 → dismissed
+    { date: "2026-01-05", perShare: 0.6 },     // → new，美股估 70%
+    { date: "2024-12-01", perShare: 0.4 },     // 除息時 0 股 → 不出現
+    { date: "bad-date", perShare: 1 },
+  ]);
+  assert.deepEqual(out.map(x => x.status), ["new", "dismissed", "dup"]);   // 日期新→舊排序
+  const fresh = out[0];
+  assert.equal(fresh.gross, 6);
+  assert.equal(fresh.amount, 4.2);              // 10×0.6×0.7 預扣稅估算
+  assert.equal(fresh.us, true);
+  assert.equal(fresh.key, "2026-01-05|0.6");
+  // 台幣不估稅、非股票回空
+  const tw = lib.detectStockDividends({ ...h, currency: "TWD", dividends: [], divDismissed: [] }, [{ date: "2026-01-05", perShare: 0.6 }]);
+  assert.equal(tw[0].amount, 6);
+  assert.deepEqual(lib.detectStockDividends({ ...h, assetType: "fund" }, [{ date: "2026-01-05", perShare: 1 }]), []);
+});
+check("sanitize 保留合法 divDismissed", () => {
+  const [h] = lib.sanitizeImportedHoldings([{
+    fundCode: "S1", assetType: "stock", fundName: "x", currency: "TWD",
+    divDismissed: ["2026-01-05|0.6", "evil{}", "2026-01-06|abc", 123],
+  }]);
+  assert.deepEqual(h.divDismissed, ["2026-01-05|0.6"]);
 });
 
 /* ---------------- 定期定額排程 ---------------- */
