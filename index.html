@@ -309,9 +309,7 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
     </div>
     <span class="spacer"></span>
     <div class="utility-actions">
-      <button class="btn" id="btnExport" title="匯出 JSON">匯出</button>
-      <button class="btn" id="btnImport" title="匯入 JSON">匯入</button>
-      <button class="btn" id="btnCsv" title="從 CSV 批次匯入買入/配息記錄">CSV</button>
+      <button class="btn" id="btnData" title="備份還原（JSON）與基富通報表（CSV）匯入匯出">📂<span class="btn-label">資料</span></button>
       <button class="btn" id="btnColorSwap" type="button" title="將上漲與下跌顏色對調" aria-pressed="false"><span class="color-swap-icon"><span class="pos">漲</span><span class="neg">跌</span></span>色</button>
       <button class="btn" id="btnPrivacy" type="button" title="碼住金額（方便截圖分享）" aria-pressed="false">🔒 隱私</button>
       <button class="btn" id="btnTheme" title="切換主題">🌓</button>
@@ -680,8 +678,18 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
 
 <!-- ===== CSV 匯入 Dialog ===== -->
 <dialog id="dlgCsv" style="width:min(820px,96vw);max-width:96vw">
-  <div class="dlgHead"><span>CSV 匯入 / 匯出</span><button class="xBtn" data-close="dlgCsv">✕</button></div>
+  <div class="dlgHead"><span>📂 資料管理</span><button class="xBtn" data-close="dlgCsv">✕</button></div>
   <div class="dlgBody">
+    <div class="secHead">💾 備份與還原（JSON）</div>
+    <div class="navRow" style="align-items:center;flex-wrap:wrap;gap:8px">
+      <button class="btn primary" id="btnExport">⬇ 匯出完整備份</button>
+      <button class="btn" id="btnImport">⬆ 匯入還原</button>
+      <span class="subTxt" id="backupMeta" style="margin-left:auto"></span>
+    </div>
+    <div class="note">備份包含持倉、交易記錄、設定與淨值快取。資料只存在這台裝置的瀏覽器裡——清除瀏覽器資料前請先匯出備份。</div>
+
+    <div style="border-top:2px solid var(--border);margin-top:14px;padding-top:10px">
+    <div class="secHead">🏦 基富通報表（CSV）</div>
     <div class="field">
       <label>匯入：選擇 CSV 檔案（UTF-8 或 Big5 編碼皆可，自動辨識格式）</label>
       <div class="navRow">
@@ -697,6 +705,7 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
       皆為合併匯入，重複記錄自動略過；建議順序：先匯①再匯②（順序相反也可，結果相同）。</div>
     <div id="csvStatus" class="subTxt" style="margin:8px 0"></div>
     <div id="csvPrev" style="overflow:auto;max-height:44vh"></div>
+    </div>
   </div>
   <div class="dlgFoot">
     <button class="btn" data-close="dlgCsv">取消</button>
@@ -867,6 +876,11 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
    v1.35 單檔 XIRR 進主表格：桌面「報酬率」後新增「年化」欄（fundXirr，計價幣別
          現金流），手機展開面板加第七格「年化(XIRR)」；支援排序（SORT_KEYS＋
          手機排序下拉）。僅於 renderTable 時計算一次掛在 rows 上，不進 rowData。
+   v1.36 資料操作統一入口：header 的 匯出/匯入/CSV 三鈕合併為「📂 資料」，
+         開啟原 dlgCsv 擴充的資料管理彈窗——上半「備份與還原(JSON)」（匯出鈕
+         記錄 settings._lastBackup，顯示「上次備份：N 天前」，≥30 天或未備份
+         以琥珀色提醒，不彈窗不打擾）、下半「基富通報表(CSV)」原封不動。
+         header 6 鈕減為 4 鈕；_lastBackup 進匯入白名單。
    v1.32 手機欄位分級（B）：手機隱藏 11 欄表格（不再橫向捲動），改收合列
          （名稱＋徽章／現價＋當日%／損益＋報酬率%）；點列＝展開＋選取＋切圖表
          三效合一（再點同列收合），展開面板含 6 欄完整數據、淨值日/交易時段與
@@ -3163,6 +3177,9 @@ function doExport(){
   a.href = URL.createObjectURL(blob);
   a.download = "fund_tracker_backup_"+todayStr()+".json";
   a.click(); URL.revokeObjectURL(a.href);
+  settings._lastBackup = new Date().toISOString();
+  lsSet(LS_S, settings);
+  updateBackupMeta();
   toast("已匯出備份檔");
 }
 function doImport(file){
@@ -3175,7 +3192,7 @@ function doImport(file){
       if(d.settings && typeof d.settings==="object"){
         // 僅複製已知設定欄位，避免原型污染與垃圾欄位（新增 settings 欄位時記得同步這裡）
         ["defaultChartRange","currency","refreshOnOpen","theme","swapGainLossColors","privacyMode",
-         "sortKey","sortAsc","marketSymbols","compareFundIds","marketRange",
+         "sortKey","sortAsc","_lastBackup","marketSymbols","compareFundIds","marketRange",
          "_lastRefresh","_lastRefreshAttempt","_lastDataRefresh","_lastFundDateRange"]
           .forEach(k=>{ if(Object.prototype.hasOwnProperty.call(d.settings,k)) settings[k]=d.settings[k]; });
         settings.theme = d.settings.theme==="dark" ? "dark" : "light";
@@ -3274,7 +3291,17 @@ function openCsv(){
   $("#csvStatus").textContent = "";
   $("#csvPrev").innerHTML = "";
   $("#btnCsvOk").disabled = true;
+  updateBackupMeta();
   $("#dlgCsv").showModal();
+}
+// 「上次備份」提示：超過 30 天或從未備份以琥珀色提醒（不彈窗、不打擾）
+function updateBackupMeta(){
+  const el = $("#backupMeta"); if(!el) return;
+  const t = settings._lastBackup ? new Date(settings._lastBackup) : null;
+  if(!t || isNaN(t)){ el.innerHTML = '<span style="color:var(--rsp);font-weight:700">尚未備份過</span>'; return; }
+  const days = Math.floor((Date.now()-t.getTime())/864e5);
+  const text = days<=0 ? "今天" : `${days} 天前`;
+  el.innerHTML = "上次備份：" + (days>=30 ? `<span style="color:var(--rsp);font-weight:700">${text}</span>` : text);
 }
 function downloadCsvTemplate(){
   const tpl = "﻿基金,類型,日期,金額,單位數,淨值,手續費,備註\r\n"
@@ -3814,7 +3841,7 @@ $("#btnMarketRefresh").onclick = ()=>loadMarketQuotes(true);
 $("#btnExport").onclick = doExport;
 $("#btnImport").onclick = ()=>$("#importFile").click();
 $("#importFile").onchange = e=>{ if(e.target.files[0]) doImport(e.target.files[0]); e.target.value=""; };
-$("#btnCsv").onclick = openCsv;
+$("#btnData").onclick = openCsv;           // 📂 資料：備份還原＋基富通報表 統一入口
 $("#emptyAddFund").onclick = openAdd;      // 空狀態的行動出口：不用回頭找工具列
 $("#emptyAddStock").onclick = openStock;
 $("#emptyCsv").onclick = openCsv;
