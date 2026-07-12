@@ -570,6 +570,20 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
       <div class="note">賣出會<b>以平均成本法計入損益</b>：扣減持有股數、計算已實現損益，並在走勢圖標示「S」、可點開看明細。總損益＝未實現＋已實現＋配息。</div>
     </div>
 
+    <div id="splitAdjSection" hidden style="border-top:2px solid var(--border);margin-top:14px;padding-top:10px">
+      <div class="secHead">🧩 結轉拆分（合成歷史定期定額）</div>
+      <div class="note" style="margin:0 0 8px">此持倉含「彙總／結轉」記錄——日期不是實際扣款日，XIRR 會失真。若這段結轉來自定期定額，輸入當時的契約參數（可在基富通「定期定額查詢/變更」查到），即可拆成逐月扣款：<b>單位數與金額總和會校正到與結轉完全一致</b>，只是日期改為真實排程日（假日順延）。</div>
+      <div class="row2">
+        <div class="field"><label>契約開始日期</label><input type="date" id="saStart"></div>
+        <div class="field"><label>每月扣款日（1–31）</label><input type="number" id="saDay" min="1" max="31" step="1" placeholder="例：18"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>每期金額（計價幣別）</label><input type="number" id="saAmt" min="0" step="any" placeholder="例：3000"></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="btn primary" id="btnSplitAdj" style="width:100%">拆分結轉</button></div>
+      </div>
+      <div id="saStatus" class="subTxt"></div>
+    </div>
+
     <div id="rspSection" style="border-top:2px solid var(--border);margin-top:14px;padding-top:10px">
       <div class="secHead">🔁 定期定額排程</div>
       <div id="rspList"></div>
@@ -672,10 +686,11 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
         <button class="btn" id="btnCsvExport">⬆ 匯出報表（基富通格式）</button>
       </div>
     </div>
-    <div class="note">支援兩種格式自動辨識：<br>
-      ① <b>基富通投資總覽匯出報表</b>——網站「投資總覽 → 匯出報表」下載的 CSV 直接匯入，每支基金以平均申購淨值記一筆彙總，累積配息一併帶入。<br>
-      ② <b>逐筆交易格式</b>——欄位：基金（名稱或 ISIN）、類型（定期定額／單筆／配息）、日期、金額、單位數*、淨值*（空白自動查）、手續費*、備註*（*選填）。<br>
-      皆為合併匯入，重複記錄自動略過。</div>
+    <div class="note">支援三種格式自動辨識：<br>
+      ① <b>投資總覽（庫存彙總）報表</b>——「投資總覽 → 匯出報表」。<b>總量基準</b>：首次匯入 30 秒建好組合；之後重匯＝對帳更新，只補差額、不會重複記帳。<br>
+      ② <b>歷史交易明細報表</b>——「交易查詢 → 歷史交易查詢（區間上限一年）→ 匯出交易明細」。把彙總拆成<b>真實日期</b>的逐筆記錄（定期定額/轉申購→買入、轉贖回→賣出），XIRR 年化才有意義；與彙總的差額自動生成「期初結轉」。<br>
+      ③ <b>逐筆交易範本</b>——欄位：基金（名稱或 ISIN）、類型（定期定額／單筆／配息）、日期、金額、單位數*、淨值*（空白自動查）、手續費*、備註*（*選填）。<br>
+      皆為合併匯入，重複記錄自動略過；建議順序：先匯①再匯②（順序相反也可，結果相同）。</div>
     <div id="csvStatus" class="subTxt" style="margin:8px 0"></div>
     <div id="csvPrev" style="overflow:auto;max-height:44vh"></div>
   </div>
@@ -828,6 +843,17 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
          總損益（21px、不換行）金額較大即撐出磚外被切。改 2 欄（每磚約 170px，
          實測 +NT$ 13,175,000 八位數可容納）、#sumPL 手機字級 21→19px；
          桌面 flex 版面與字級不變。
+   v1.33 基富通歷史交易匯入＋庫存彙總對帳模式：①第三種 CSV 自動辨識——「歷史
+         交易明細」（交易查詢→歷史交易查詢→匯出，區間上限一年）：定期定額/
+         轉申購→買入（真實日期與單位數）、轉贖回→賣出（frTxnType/frTxnEntries
+         純函式可測）。②對帳模式——庫存彙總為總量基準：彙總匯入不再整包記帳，
+         改為「目標－既有記錄淨部位＝結轉差額」（snapTargets），重匯只補差額、
+         逐筆記錄（origin frtxn/frsyn）永不被蓋；新使用者無逐筆記錄時差額＝全部，
+         行為與舊版相同。③已出清基金——以最早轉贖回列的「投資本金」推算期初
+         結轉（sellAnchors），已實現損益＝價金－本金，與基富通參考損益一致。
+         ④結轉拆分——管理彈窗新區塊：輸入契約參數（開始日/扣款日/金額）把結轉
+         合成為逐月扣款，單位與金額總和校正至與結轉完全一致，殘差補最後一筆。
+         匯入消毒 origin 白名單擴充 frtxn/frsyn。
    v1.32 手機欄位分級（B）：手機隱藏 11 欄表格（不再橫向捲動），改收合列
          （名稱＋徽章／現價＋當日%／損益＋報酬率%）；點列＝展開＋選取＋切圖表
          三效合一（再點同列收合），展開面板含 6 欄完整數據、淨值日/交易時段與
@@ -2919,6 +2945,8 @@ function openMng(id){
   $("#eSellPriceLabel").textContent = h.assetType==="stock" ? "賣出價" : "賣出淨值";
   $("#rspSection").hidden = h.assetType==="stock";
   $("#btnDivDetectMng").hidden = h.assetType!=="stock";
+  $("#splitAdjSection").hidden = h.assetType==="stock" || !h.purchases.some(p=>p.origin==="fundrich");
+  $("#saStatus").textContent = "";
   renderPurTable(); renderDivTable(); renderSellTable(); renderRspList();
   $("#rspStart").value = todayStr();
   $("#dlgMng").showModal();
@@ -3061,6 +3089,7 @@ function sanitizeImportedHoldings(list){
       isin: /^[A-Z]{2}[A-Z0-9]{9}\d$/.test(isinRaw) ? isinRaw : "",
       exchange: impStr(h.exchange,24),
       quoteType: impStr(h.quoteType,12),
+      ...(/^[A-Za-z0-9]{1,16}$/.test(String(h.frCode||"")) ? {frCode:String(h.frCode)} : {}),
       purchases: (Array.isArray(h.purchases)?h.purchases:[]).map(p=>{
         if(!p || typeof p!=="object") return null;
         // units 可為 0（v1.17 觀察持倉：僅追蹤走勢、成本損益為 0）；有單位數時才要求淨值 > 0
@@ -3069,7 +3098,7 @@ function sanitizeImportedHoldings(list){
         if(units==null || (units>0 && !(nav>0)) || !IMP_DATE_RE.test(String(p.date||""))) return null;
         return {purchaseId:uid("p"), type:(p.type==="LUMP"?"LUMP":"RSP"), date:p.date, units, navAtPurchase:nav,
           amount:impPosNum(p.amount), fee:impPosNum(p.fee)||0, note:impStr(p.note,200),
-          ...(p.origin==="fundrich"?{origin:"fundrich"}:{})};
+          ...(["fundrich","frtxn","frsyn"].includes(p.origin)?{origin:p.origin}:{})};
       }).filter(Boolean),
       dividends: (Array.isArray(h.dividends)?h.dividends:[]).map(d=>{
         if(!d || typeof d!=="object") return null;
@@ -3216,6 +3245,8 @@ function matchHoldingByResolved(g){
     (sec && String(x.fundCode||"").toUpperCase()===sec) ||
     (isin && String(x.isin||"").toUpperCase()===isin)
   )) || null;
+  // 基富通代碼不同＝不同級別（如原級別 vs R 級同名家族），即使搜尋落到同一 Morningstar 級別也不可合併
+  if(g.holding && g.frCode && g.holding.frCode && g.holding.frCode!==g.frCode) g.holding = null;
 }
 function openCsv(){
   csvState = null;
@@ -3256,6 +3287,9 @@ async function processCsvText(text){
   if(rows.length<2){ st.textContent = "❌ 檔案無資料列（需含標題列＋至少一筆記錄）"; return; }
   // 標題對應
   const H = rows[0].map(c=>c.trim());
+  // 基富通「歷史交易明細」格式自動辨識（交易查詢→歷史交易查詢→匯出交易明細）
+  if(H.includes("基金代碼") && H.includes("交易類別") && H.includes("交易日期"))
+    return processFundrichTxnCsv(rows, H);
   // 基富通「投資總覽匯出報表」格式自動辨識
   if(H.includes("基金代碼") && H.includes("庫存單位數") && H.includes("平均申購淨值"))
     return processFundrichCsv(rows, H);
@@ -3336,6 +3370,92 @@ function frPickDefault(cands, rawName, wantCur){
   });
   return best;
 }
+/* ---- 基富通歷史交易明細匯入（真實日期逐筆：定期定額/轉申購→買入、轉贖回→賣出） ---- */
+// 交易類別 → 記錄類型（RSP/LUMP 買入、SELL 賣出、DIV 配息；其他不支援）
+function frTxnType(s){
+  s = String(s??"").trim();
+  if(!s) return null;
+  if(/定期定額|智動投/.test(s)) return "RSP";
+  if(/申購/.test(s)) return "LUMP";        // 含 轉申購／單筆申購
+  if(/贖回|買回/.test(s)) return "SELL";   // 含 轉贖回
+  if(/配息/.test(s)) return "DIV";
+  return null;
+}
+// 純解析（可單元測試）：歷史交易列 → 匯入 entries（key＝基金代碼，供分組比對）
+function frTxnEntries(rows, H){
+  const idx = name => H.indexOf(name);
+  const col = {code:idx("基金代碼"), type:idx("交易類別"), name:idx("基金名稱"), date:idx("交易日期"),
+               nav:idx("淨值"), amt:idx("交易金額（含手續費）"), units:idx("單位數"),
+               fee:idx("手續費用"), status:idx("交易狀態"), cur:idx("交易金額（幣別）"),
+               principal:idx("投資本金")};
+  if(col.type<0 || col.date<0 || col.units<0 || col.nav<0 || col.name<0)
+    return {error:"歷史交易報表欄位不完整（需含 交易類別/交易日期/單位數/淨值/基金名稱）", entries:[]};
+  const entries = [];
+  rows.slice(1).forEach((r,i)=>{
+    const get = c => c>=0 ? String(r[c]??"").trim() : "";
+    const rawName = get(col.name), code = get(col.code).replace(/'/g,"");
+    if(!rawName && !code) return;
+    const curM = get(col.cur).match(/[A-Z]{3}/);
+    const e = {line:i+2, key:(code||frCleanName(rawName)), rawName, frCode:code||null, type:frTxnType(get(col.type)),
+      date:csvNormDate(get(col.date)), amount:csvNum(get(col.amt)), units:csvNum(get(col.units)),
+      nav:csvNum(get(col.nav)), fee:csvNum(get(col.fee))||0, navDate:null, txn:true,
+      principal:csvNum(get(col.principal)),   // 轉贖回列＝被贖回部位的原始成本（推算已出清基金的期初結轉）
+      wantCur:curM?curM[0]:null, status:"ok", err:"",
+      note:"基富通"+get(col.type)};
+    const st = get(col.status);
+    if(st && st!=="交易成功"){ e.status="dup"; e.err=`交易狀態「${st}」，略過`; }
+    else if(!e.type){ e.status="err"; e.err=`未支援的交易類別「${get(col.type)}」`; }
+    else if(!e.date){ e.status="err"; e.err="日期格式錯誤"; }
+    else if(e.type==="DIV"){ if(!(e.amount>0)){ e.status="err"; e.err="配息需有金額"; } }
+    else if(!(e.units>0) || !(e.nav>0)){ e.status="err"; e.err="單位數或淨值缺漏"; }
+    else if(e.type!=="SELL" && !(e.amount>0)){ e.status="err"; e.err="買入需有交易金額"; }
+    entries.push(e);
+  });
+  return {entries};
+}
+async function processFundrichTxnCsv(rows, H){
+  const st = $("#csvStatus");
+  const parsed = frTxnEntries(rows, H);
+  if(parsed.error){ st.textContent = "❌ "+parsed.error; return; }
+  const entries = parsed.entries;
+  if(!entries.length){ st.textContent = "❌ 報表無資料列"; return; }
+  const groups = new Map();
+  entries.forEach(e=>{ if(e.status!=="err" && !groups.has(e.key))
+    groups.set(e.key, {key:e.key, rawName:e.rawName, wantCur:e.wantCur, frCode:e.frCode||null, holding:null, candidates:[], chosen:0, hist:null, error:null}); });
+  csvState = {entries, groups, txn:true};
+  let gi = 0;
+  for(const g of groups.values()){
+    gi++;
+    st.innerHTML = `<span class="spin"></span> 比對基金 ${gi}/${groups.size}：${esc(g.rawName||g.key)}…`;
+    const clean = frCleanName(g.rawName);
+    // 基富通代碼精確比對優先；名稱比對僅在該持倉沒有代碼時採用（避免同名家族誤併級別）
+    const ex = holdings.find(h=>h.assetType!=="stock" && (
+      (g.frCode && h.frCode===g.frCode) ||
+      (!(g.frCode && h.frCode) && (h.fundName===clean || h.fundName===g.rawName))
+    ));
+    if(ex){ g.holding = ex; g.nameMatched = true; g.candidates = [{secId:ex.fundCode, name:ex.fundName, currency:ex.currency, isin:ex.isin||""}]; continue; }
+    // 與投資總覽相同的漸進式搜尋
+    const norm = clean.replace(/[—－–]/g,"-");
+    const base = norm.split("-")[0].replace(/證券投資信託/g,"").replace(/[(（].*$/,"").trim();
+    const tries = [...new Set([norm, norm.replace(/證券投資信託/g,""), base, base.replace(/基金$/,""), base.replace(/基金$/,"").slice(0,5)])].filter(t=>t.length>=2);
+    let found = [];
+    for(const t of tries){
+      try{ found = await msSearch(t); }
+      catch(err){ g.error = "搜尋失敗："+err.message; break; }
+      if(found.length) break;
+    }
+    if(g.error) continue;
+    if(!found.length){ g.error = "查無此基金"; continue; }
+    g.candidates = found;
+    g.chosen = frPickDefault(found, g.rawName, g.wantCur);
+    matchHoldingByResolved(g);
+  }
+  await fillCsvNavs();
+  dedupeCsv();
+  renderCsvPreview();
+  $("#csvStatus").innerHTML += '　<span class="subTxt">歷史交易：轉贖回會記為賣出（計入已實現損益）；匯入後若持倉含彙總記錄，會自動改為「期初結轉」補足與庫存彙總的差額。</span>';
+}
+
 async function processFundrichCsv(rows, H){
   const st = $("#csvStatus");
   const idx = name => H.indexOf(name);
@@ -3353,23 +3473,24 @@ async function processFundrichCsv(rows, H){
     const code = get(col.code).replace(/'/g,"");
     const e = {line:i+2, key:frCleanName(rawName), rawName, type:"LUMP", date:navDate,
       amount:(principal>0?principal:null), units, nav, fee:0, note:"基富通庫存 "+code,
-      status:"ok", err:"", navDate:null, snapshot:true, wantCur:curM?curM[0]:null};
+      status:"ok", err:"", navDate:null, snapshot:true, wantCur:curM?curM[0]:null, frCode:code||null};
     if(!(units>0)||!(nav>0)){ e.status="err"; e.err="單位數或平均申購淨值缺漏"; }
     entries.push(e);
     if(divAmt>0 && e.status==="ok")
       entries.push({line:i+2, key:e.key, rawName, type:"DIV", date:navDate, amount:divAmt, units:null, nav:null,
-        fee:0, note:"基富通累積配息", status:"ok", err:"", navDate:null, snapshot:true, wantCur:e.wantCur});
+        fee:0, note:"基富通累積配息", status:"ok", err:"", navDate:null, snapshot:true, wantCur:e.wantCur, frCode:code||null});
   });
   if(!entries.length){ st.textContent="❌ 報表無資料列"; return; }
   const groups = new Map();
   entries.forEach(e=>{ if(e.status!=="err" && !groups.has(e.key))
-    groups.set(e.key, {key:e.key, rawName:e.rawName, wantCur:e.wantCur, holding:null, candidates:[], chosen:0, hist:null, error:null}); });
+    groups.set(e.key, {key:e.key, rawName:e.rawName, wantCur:e.wantCur, frCode:e.frCode||null, holding:null, candidates:[], chosen:0, hist:null, error:null}); });
   csvState = {entries, groups, fundrich:true};
   let gi = 0;
   for(const g of groups.values()){
     gi++;
     st.innerHTML = `<span class="spin"></span> 比對基金 ${gi}/${groups.size}：${esc(g.key)}…`;
-    const ex = holdings.find(h=>h.assetType!=="stock" && (h.fundName===g.key || h.fundName===g.rawName));
+    // 基富通代碼精確比對優先（同名家族不同級別靠代碼區分），再退回名稱比對
+    const ex = holdings.find(h=>h.assetType!=="stock" && ((g.frCode && h.frCode===g.frCode) || h.fundName===g.key || h.fundName===g.rawName));
     if(ex){ g.holding = ex; g.nameMatched = true; g.candidates = [{secId:ex.fundCode, name:ex.fundName, currency:ex.currency, isin:ex.isin||""}]; continue; }
     // 漸進式關鍵字搜尋：全名 → 去「證券投資信託」→ 去級別後綴 → 去「基金」字尾
     const norm = g.key.replace(/[—－–]/g,"-");   // 全形/長破折號 → 半形
@@ -3408,7 +3529,7 @@ async function fillCsvNavs(){
   for(const g of groups.values()){
     if(g.error) continue;
     const rows = entries.filter(e=>e.key===g.key && e.status!=="err");
-    const purRows = rows.filter(e=>e.type!=="DIV");
+    const purRows = rows.filter(e=>e.type!=="DIV" && e.type!=="SELL");   // 賣出列自帶淨值，不需查
     const cand = g.candidates[g.chosen];
     // 需要查淨值（淨值空白或單位數待算）的範圍
     const need = purRows.filter(e=>!(e.nav>0));
@@ -3449,6 +3570,8 @@ function dedupeCsv(){
       if(e.snapshot){ e.replace = h.purchases.some(p=>p.origin==="fundrich") || (h.dividends||[]).some(d=>d.origin==="fundrich"); return; }
       if(e.type==="DIV"){
         if((h.dividends||[]).some(d=>d.date===e.date && Math.abs(+d.amount-e.amount)<0.01)){ e.status="dup"; e.err="已存在相同配息"; }
+      }else if(e.type==="SELL"){
+        if((h.sells||[]).some(s=>s.date===e.date && Math.abs(+s.units-e.units)<0.0001)){ e.status="dup"; e.err="已存在相同賣出"; }
       }else{
         if(h.purchases.some(p=>p.date===recDate && (Math.abs(+p.units-e.units)<0.0001 || (e.amount&&p.amount&&Math.abs(+p.amount-e.amount)<0.01)))){ e.status="dup"; e.err="已存在相同買入"; }
       }
@@ -3463,7 +3586,7 @@ function renderCsvPreview(){
   const dupN = entries.filter(e=>e.status==="dup").length;
   const errN = entries.filter(e=>e.status==="err").length;
   st.innerHTML = `共 ${entries.length} 筆：<span class="st-ok">可匯入 ${okN}</span> · <span class="st-dup">重複略過 ${dupN}</span> · <span class="st-err">錯誤 ${errN}</span>`;
-  const typeTxt = {RSP:"定期", LUMP:"單筆", DIV:"配息"};
+  const typeTxt = {RSP:"定期", LUMP:"單筆", DIV:"配息", SELL:"賣出"};
   $("#csvPrev").innerHTML = `<table><thead><tr><th>列</th><th>基金</th><th>類型</th><th>日期</th><th>金額</th><th>單位數</th><th>淨值</th><th>狀態</th></tr></thead><tbody>` +
     entries.map((e,i)=>{
       const g = groups.get(e.key);
@@ -3505,7 +3628,10 @@ async function confirmCsvImport(){
   const {entries, groups} = csvState;
   const newHoldings = [];
   const clearedSnapshot = new Set();   // 本次匯入已清過舊彙總的持倉，避免多列重複清除
-  let nPur = 0, nDiv = 0, nReplace = 0;
+  const txnCleared = new Set();        // 歷史交易匯入時已捕捉彙總目標的持倉
+  const snapTargets = new Map();       // holdingId → {units,cost,nav,date,note}：庫存彙總對帳目標
+  const sellAnchors = new Map();       // holdingId → 最早賣出的 {date,units,principal}：已出清基金結轉錨點
+  let nPur = 0, nSell = 0, nDiv = 0, nReplace = 0;
   const findExisting = c => holdings.find(x=>x.assetType!=="stock" && (
     String(x.fundCode||"").toUpperCase()===String(c.secId||"").toUpperCase() ||
     (c.isin && String(x.isin||"").toUpperCase()===String(c.isin).toUpperCase())
@@ -3514,12 +3640,26 @@ async function confirmCsvImport(){
     const g = groups.get(e.key);
     const c = g.candidates[g.chosen];
     let h = g.holding || findExisting(c);
+    if(h && g.frCode && h.frCode && h.frCode!==g.frCode) h = null;   // 基富通代碼不同＝不同級別，不合併
     if(!h){
-      h = {id:uid("holding"), assetType:"fund", fundCode:c.secId, fundName:c.name, currency:c.currency, isin:c.isin||"", purchases:[], dividends:[], rspPlans:[]};
+      h = {id:uid("holding"), assetType:"fund", fundCode:c.secId, fundName:c.name, currency:c.currency, isin:c.isin||"", purchases:[], dividends:[], rspPlans:[], sells:[], divDismissed:[]};
       holdings.push(h); newHoldings.push(h);
       g.holding = h;
     }
-    // 基富通彙總覆蓋：首次處理此持倉時，移除舊的基富通彙總記錄（保留手動買入/配息），避免重複加倉
+    if(g.frCode && !h.frCode) h.frCode = g.frCode;   // 記住基富通代碼，日後匯入以代碼精確比對
+    // 歷史交易匯入：首次處理此持倉時，把既有「彙總/結轉」的總量記為對帳目標後移除，
+    // 匯入真實逐筆後由差額重新生成結轉（總量永遠回到庫存彙總）
+    if(e.txn && !txnCleared.has(h.id)){
+      txnCleared.add(h.id);
+      if(h.purchases.some(p=>p.origin==="fundrich")){
+        const prev = positionOf(h);
+        snapTargets.set(h.id, {units:prev.held, cost:prev.basis, nav:null, date:null,
+          note:"期初結轉（依庫存彙總對帳，日期可自行修正）"});
+        h.purchases = h.purchases.filter(p=>p.origin!=="fundrich");
+        nReplace++;
+      }
+    }
+    // 庫存彙總匯入：移除舊彙總/結轉與彙總配息（保留手動與歷史交易記錄），改記對帳目標
     if(e.snapshot && !clearedSnapshot.has(h.id)){
       clearedSnapshot.add(h.id);
       const removed = h.purchases.filter(p=>p.origin==="fundrich").length + (h.dividends||[]).filter(d=>d.origin==="fundrich").length;
@@ -3527,10 +3667,23 @@ async function confirmCsvImport(){
       h.dividends = (h.dividends||[]).filter(d=>d.origin!=="fundrich");
       if(removed) nReplace++;
     }
-    const origin = e.snapshot ? {origin:"fundrich"} : {};
+    const origin = e.snapshot ? {origin:"fundrich"} : (e.txn ? {origin:"frtxn"} : {});
     if(e.type==="DIV"){
       h.dividends.push({divId:uid("d"), date:e.date, amount:e.amount, note:e.note||"", ...origin});
       nDiv++;
+    }else if(e.type==="SELL"){
+      h.sells = h.sells||[];
+      h.sells.push({sellId:uid("s"), date:e.date, units:e.units, price:e.nav, fee:(e.fee>0?e.fee:0), note:e.note||""});
+      // 記錄最早一筆賣出的投資本金：已出清基金（不在庫存彙總）的期初結轉由此推算
+      if(e.principal>0){
+        const prev = sellAnchors.get(h.id);
+        if(!prev || e.date < prev.date) sellAnchors.set(h.id, {date:e.date, units:e.units, principal:e.principal});
+      }
+      nSell++;
+    }else if(e.snapshot){
+      // 彙總買入列不直接記帳：改為對帳目標，稍後以差額生成結轉（無其他記錄時＝整筆，行為同舊版）
+      snapTargets.set(h.id, {units:e.units, cost:(e.amount>0?e.amount:e.units*e.nav), nav:e.nav,
+        date:(e.navDate||e.date), note:e.note||""});
     }else{
       h.purchases.push({purchaseId:uid("p"), type:e.type, date:(e.navDate||e.date), units:e.units, navAtPurchase:e.nav,
         amount:(e.amount>0?e.amount:null), fee:(e.fee>0?e.fee:0), note:e.note||"", ...origin});
@@ -3538,12 +3691,54 @@ async function confirmCsvImport(){
     }
     if(g.hist && g.hist.length){ mergeHistory(h, g.hist); g.hist = null; } // 順手存進快取
   });
-  holdings.forEach(h=>{ h.purchases.sort((a,b)=>b.date.localeCompare(a.date)); (h.dividends||[]).sort((a,b)=>b.date.localeCompare(a.date)); });
+  // 對帳：目標（庫存彙總）－既有記錄淨部位 ＝ 結轉差額（v1.33 對帳模式核心）
+  let nAdj = 0;
+  const adjWarnings = [];
+  // 已出清基金：以最早賣出列的「投資本金」推算賣出前應有的部位（結轉），
+  // 使已實現損益＝價金－本金，與基富通參考損益一致
+  sellAnchors.forEach((a, hid)=>{
+    const h = holdings.find(x=>x.id===hid); if(!h) return;
+    const before = h.purchases.filter(p=>(p.date||"") < a.date);
+    const uBefore = before.reduce((s,p)=>s+(+p.units||0),0);
+    const cBefore = before.reduce((s,p)=>s+purCost(p),0);
+    const needU = +(a.units - uBefore).toFixed(4);
+    const needC = +(a.principal - cBefore).toFixed(2);
+    if(needU > 0.0005){
+      const dates = h.purchases.map(p=>p.date).sort();
+      const adjDate = dates.length ? addDays(dates[0], -1) : addDays(a.date, -1);
+      h.purchases.push({purchaseId:uid("p"), type:"LUMP", date:adjDate, units:needU,
+        navAtPurchase: needC>0 ? +(needC/needU).toFixed(6) : 0,
+        amount: needC>0 ? needC : null, fee:0, origin:"fundrich",
+        note:"期初結轉（依轉贖回投資本金推算，日期可自行修正）"});
+      nAdj++;
+    }
+  });
+  snapTargets.forEach((t, hid)=>{
+    const h = holdings.find(x=>x.id===hid); if(!h) return;
+    const pos = positionOf(h);
+    const dU = +(t.units - pos.held).toFixed(4);
+    const dC = +(t.cost - pos.basis).toFixed(2);
+    if(dU > 0.0005){
+      const otherDates = h.purchases.filter(p=>p.origin!=="fundrich").map(p=>p.date).sort();
+      const adjDate = otherDates.length ? addDays(otherDates[0], -1) : (t.date||todayStr());
+      const isAdj = otherDates.length>0;
+      h.purchases.push({purchaseId:uid("p"), type:"LUMP", date:adjDate, units:dU,
+        navAtPurchase: dC>0 ? +(dC/dU).toFixed(6) : (t.nav||0),
+        amount: dC>0 ? dC : null, fee:0, origin:"fundrich",
+        note: isAdj ? "期初結轉（依庫存彙總對帳，日期可自行修正）" : (t.note||"")});
+      if(isAdj) nAdj++; else nPur++;   // 無其他記錄＝整筆彙總（新使用者路徑），計為買入而非結轉
+    }else if(dU < -0.0005){
+      adjWarnings.push(`${h.fundName}：既有記錄比彙總多 ${fmtN(-dU,4)} 單位，未生成結轉（請檢查是否重複匯入）`);
+    }
+    // |dU|≈0：逐筆已完全覆蓋彙總 → 不需結轉
+  });
+  holdings.forEach(h=>{ h.purchases.sort((a,b)=>b.date.localeCompare(a.date)); (h.dividends||[]).sort((a,b)=>b.date.localeCompare(a.date)); (h.sells||[]).sort((a,b)=>b.date.localeCompare(a.date)); });
   lsSet(LS_H, holdings);
   if(!selectedId && holdings.length) selectedId = holdings[0].id;
   $("#dlgCsv").close();
   renderAll();
-  toast(`✅ 已匯入 ${nPur} 筆買入、${nDiv} 筆配息${nReplace?`（更新 ${nReplace} 檔既有部位）`:""}${newHoldings.length?`（新增 ${newHoldings.length} 支基金）`:""}`, 3800);
+  toast(`✅ 已匯入 ${nPur} 筆買入${nSell?`、${nSell} 筆賣出`:""}、${nDiv} 筆配息${nAdj?`、${nAdj} 筆結轉`:""}${nReplace?`（對帳更新 ${nReplace} 檔）`:""}${newHoldings.length?`（新增 ${newHoldings.length} 支基金）`:""}`, 4200);
+  if(adjWarnings.length) console.warn("對帳警告：\n"+adjWarnings.join("\n"));
   // 背景補抓新基金完整歷史
   for(const h of newHoldings){ await updateFund(h); renderAll(false); }
   if(newHoldings.length) renderAll();
@@ -4172,6 +4367,63 @@ $("#sellBody").onclick = e=>{
       lsSet(LS_H,holdings); renderSellTable(); renderAll();
     }
   }
+};
+
+/* 結轉拆分：把「彙總/結轉」記錄合成為逐月定期定額（總量校正到與結轉完全一致） */
+$("#btnSplitAdj").onclick = async ()=>{
+  const h = holdings.find(x=>x.id===mngHoldingId);
+  if(!h || h.assetType==="stock") return;
+  const adjRecs = h.purchases.filter(p=>p.origin==="fundrich");
+  if(!adjRecs.length){ toast("此持倉沒有彙總／結轉記錄"); return; }
+  const start = $("#saStart").value;
+  const day = parseInt($("#saDay").value,10);
+  const amt = parseFloat($("#saAmt").value);
+  const st = $("#saStatus");
+  if(!start){ toast("請選擇契約開始日期"); return; }
+  if(!(day>=1 && day<=31)){ toast("扣款日需為 1–31"); return; }
+  if(!(amt>0)){ toast("請輸入每期金額"); return; }
+  const AU = adjRecs.reduce((s,p)=>s+(+p.units||0),0);              // 結轉總單位（校正錨點）
+  const AC = adjRecs.reduce((s,p)=>s+purCost(p),0);                 // 結轉總成本
+  if(!(AU>0)){ toast("結轉單位數為 0，無法拆分"); return; }
+  const others = h.purchases.filter(p=>p.origin!=="fundrich").map(p=>p.date).sort();
+  const boundary = others.length ? others[0] : todayStr();          // 拆到最早真實記錄前為止
+  const plan = {startDate:start, dayOfMonth:day};
+  const dates = [];
+  let cur = nextSched(plan, null), guard = 0;
+  while(cur < boundary && guard++ < 600){ dates.push(cur); cur = nextSched(plan, cur); }
+  if(!dates.length){ toast("開始日期到最早真實記錄之間沒有排程期數"); return; }
+  st.innerHTML = '<span class="spin"></span> 抓取歷史淨值…';
+  let hist;
+  try{ hist = await msHistory(h.fundCode, addDays(start,-10), boundary, h.currency); }
+  catch(e){ st.textContent = "淨值抓取失敗："+e.message; return; }
+  const recs = [];
+  for(const d of dates){
+    const nv = findNavInList(hist, d, 20);   // 順延上限 20 天：春節連假休市可達 12 天以上
+    if(!nv){ st.textContent = `查無 ${d} 附近淨值，無法拆分（可改用開始日期較晚的區間）`; return; }
+    recs.push({schedDate:d, date:nv.date, rawUnits:amt/nv.nav});
+  }
+  const sumU = recs.reduce((s,r)=>s+r.rawUnits,0);
+  if(!(sumU>0)){ st.textContent = "合成失敗（單位數為 0）"; return; }
+  if(!confirm(`將把結轉 ${fmtN(AU,4)} 單位／${fmtN(AC,0)} ${h.currency} 拆成 ${recs.length} 筆定期定額`
+    +`（${dates[0]}～${dates.at(-1)}，每月 ${day} 日、假日順延），單位數與金額總和與結轉完全一致。繼續？`)){ st.textContent=""; return; }
+  const uScale = AU/sumU, aEach = AC/recs.length;
+  h.purchases = h.purchases.filter(p=>p.origin!=="fundrich");
+  let accU = 0, accA = 0;
+  recs.forEach((r,i)=>{
+    let u = +(r.rawUnits*uScale).toFixed(4), a = +aEach.toFixed(2);
+    if(i===recs.length-1){ u = +(AU-accU).toFixed(4); a = +(AC-accA).toFixed(2); }   // 捨入殘差補在最後一筆
+    accU = +(accU+u).toFixed(4); accA = +(accA+a).toFixed(2);
+    h.purchases.push({purchaseId:uid("p"), type:"RSP", date:r.date, units:u,
+      navAtPurchase:+(a/u).toFixed(6), amount:a, fee:0, origin:"frsyn",
+      note:"合成扣款（結轉拆分）"+r.schedDate.slice(0,7)});
+  });
+  h.purchases.sort((a,b)=>b.date.localeCompare(a.date));
+  mergeHistory(h, hist);   // 順手把抓到的淨值存進快取
+  lsSet(LS_H, holdings);
+  st.textContent = "";
+  $("#splitAdjSection").hidden = true;
+  renderPurTable(); renderAll();
+  toast(`已拆分為 ${recs.length} 筆定期定額（總量與彙總一致）`, 3800);
 };
 
 /* 定期定額排程 */

@@ -72,11 +72,14 @@ const source = [
   extractFunction("csvNormType"),
   extractFunction("csvNormDate"),
   extractFunction("parseCsv"),
+  extractFunction("frCleanName"),
+  extractFunction("frTxnType"),
+  extractFunction("frTxnEntries"),
   extractFunction("sanitizeImportedHoldings"),
   extractFunction("sanitizeImportedNavCache"),
 ].join("\n");
 
-const lib = new Function(`"use strict";\n${source}\nreturn {xirr, positionOf, unitsOnDate, detectStockDividends, schedDateFor, nextSched, findNavInList, navOnOrBefore, cleanPrice, cleanAmount, csvNormType, csvNormDate, parseCsv, sanitizeImportedHoldings, sanitizeImportedNavCache, purCost, addDays};`)();
+const lib = new Function(`"use strict";\n${source}\nreturn {xirr, positionOf, unitsOnDate, detectStockDividends, schedDateFor, nextSched, findNavInList, navOnOrBefore, cleanPrice, cleanAmount, csvNormType, csvNormDate, parseCsv, frTxnType, frTxnEntries, sanitizeImportedHoldings, sanitizeImportedNavCache, purCost, addDays};`)();
 
 let passed = 0;
 function check(name, fn) {
@@ -261,6 +264,45 @@ check("csvNormDate 分隔符與範圍", () => {
   assert.equal(lib.csvNormDate("2026-13-01"), null);
   assert.equal(lib.csvNormDate("2026-01-32"), null);
   assert.equal(lib.csvNormDate("民國115年"), null);
+});
+
+/* ---------------- 基富通歷史交易明細解析（v1.33） ---------------- */
+check("frTxnType 交易類別對應", () => {
+  assert.equal(lib.frTxnType("定期定額"), "RSP");
+  assert.equal(lib.frTxnType("低檔智動投"), "RSP");
+  assert.equal(lib.frTxnType("轉申購"), "LUMP");
+  assert.equal(lib.frTxnType("單筆申購"), "LUMP");
+  assert.equal(lib.frTxnType("轉贖回"), "SELL");
+  assert.equal(lib.frTxnType("買回"), "SELL");
+  assert.equal(lib.frTxnType("配息"), "DIV");
+  assert.equal(lib.frTxnType("轉換"), null);
+});
+check("frTxnEntries 解析真實格式列", () => {
+  const H = ["基金代碼","交易類別","基金名稱","交易日期","淨值（幣別）","淨值","淨值日期",
+             "交易金額（幣別）","交易金額（含手續費）","單位數","投資本金（幣別）","投資本金",
+             "手續費用（幣別）","手續費用","交易狀態"];
+  const { entries } = lib.frTxnEntries([H,
+    ["'CSI099'","定期定額","【好好退休】國泰小龍基金R","2026/6/18","TWD","124.96","2026/6/18","TWD","3,000","24","TWD","--","TWD","0","交易成功"],
+    ["'ALI087'","轉贖回","【好好退休】安聯四季雙收入息組合基金-R類型(累積)-新臺幣","2026/3/20","TWD","14.02","2026/3/20","TWD","260,416","18,574.60","TWD","202,000","TWD","0","交易成功"],
+    ["'FSI059'","轉申購","第一金台灣核心戰略建設證券投資信託基金-累積型-新臺幣","2026/3/27","TWD","31.68","2026/3/27","TWD","260,416","8,220.20","TWD","--","TWD","0","交易成功"],
+    ["'UNI038'","定期定額","統一全球動態多重資產基金-累積美元","2026/6/25","USD","29.9746","2026/6/25","USD","100","3.34","USD","--","USD","0","交易成功"],
+    ["'XXX001'","定期定額","失敗測試基金","2026/6/1","TWD","10","2026/6/1","TWD","1,000","100","TWD","--","TWD","0","交易失敗"],
+    ["'XXX002'","轉換","不支援類別","2026/6/1","TWD","10","2026/6/1","TWD","1,000","100","TWD","--","TWD","0","交易成功"],
+  ], H);
+  assert.equal(entries.length, 6);
+  const [rsp, sell, sw, usd, fail, unknown] = entries;
+  assert.deepEqual([rsp.type, rsp.key, rsp.amount, rsp.units, rsp.nav, rsp.status],
+    ["RSP", "CSI099", 3000, 24, 124.96, "ok"]);          // 代碼引號已去除、千分位解析
+  assert.deepEqual([sell.type, sell.units, sell.principal, sell.status],
+    ["SELL", 18574.6, 202000, "ok"]);                     // 轉贖回含投資本金錨點
+  assert.deepEqual([sw.type, sw.amount, sw.status], ["LUMP", 260416, "ok"]);
+  assert.deepEqual([usd.wantCur, usd.amount], ["USD", 100]);
+  assert.equal(fail.status, "dup");                       // 非成功交易 → 略過
+  assert.equal(unknown.status, "err");                    // 未支援類別 → 錯誤
+});
+check("frTxnEntries 欄位不完整回報錯誤", () => {
+  const bad = lib.frTxnEntries([["基金代碼","交易日期"],["'A'","2026/1/1"]], ["基金代碼","交易日期"]);
+  assert.ok(bad.error);
 });
 
 /* ---------------- 匯入消毒（含 v1.25 迴歸） ---------------- */
