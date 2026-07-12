@@ -348,6 +348,7 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
       <option value="pl">損益</option>
       <option value="div">配息</option>
       <option value="plPct">報酬率</option>
+      <option value="xirr">年化(XIRR)</option>
       <option value="rangePct">區間報酬</option>
     </select>
     <button class="btn" id="mSortDir" title="切換升冪／降冪" aria-label="排序方向">↓</button>
@@ -364,6 +365,7 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
       <th data-k="pl" title="含配息">損益 <span class="arr"></span></th>
       <th data-k="div" title="累計配息（計價幣別）">配息 <span class="arr"></span></th>
       <th data-k="plPct" title="（現值＋配息－成本）/ 成本">報酬率 <span class="arr"></span></th>
+      <th data-k="xirr" title="該持倉的金額加權年化報酬（XIRR，計價幣別現金流）">年化 <span class="arr"></span></th>
       <th data-k="rangePct" title="依上方選擇的時間區間計算">區間報酬<span class="subTxt" id="rangeColHint"></span> <span class="arr"></span></th>
       <th>操作</th>
     </tr></thead>
@@ -862,6 +864,9 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
          ②「先匯歷史交易→再建排程」會雙重買入：新排程的 lastApplied 改從持倉
          最新一筆記錄之後起算（僅當該日期 ≥ 開始日）；applyRspPlans 補記前再檢查
          排程日～入帳日之間是否已有 RSP 或同額記錄（covered），有則視為已扣跳過。
+   v1.35 單檔 XIRR 進主表格：桌面「報酬率」後新增「年化」欄（fundXirr，計價幣別
+         現金流），手機展開面板加第七格「年化(XIRR)」；支援排序（SORT_KEYS＋
+         手機排序下拉）。僅於 renderTable 時計算一次掛在 rows 上，不進 rowData。
    v1.32 手機欄位分級（B）：手機隱藏 11 欄表格（不再橫向捲動），改收合列
          （名稱＋徽章／現價＋當日%／損益＋報酬率%）；點列＝展開＋選取＋切圖表
          三效合一（再點同列收合），展開面板含 6 欄完整數據、淨值日/交易時段與
@@ -966,7 +971,7 @@ let selectedId = null;
 let curRange = settings.defaultChartRange || "3M";
 let customRange = null;            // {start,end}
 let chartMode = "pct";             // pct | nav
-const SORT_KEYS = ["name","nav","dayChg","units","cost","value","pl","div","plPct","rangePct"];
+const SORT_KEYS = ["name","nav","dayChg","units","cost","value","pl","div","plPct","xirr","rangePct"];
 let sortKey = SORT_KEYS.includes(settings.sortKey) ? settings.sortKey : null;   // 記憶上次排序
 let sortAsc = settings.sortAsc !== false;
 let mobileExpandedId = null;   // 手機清單目前展開的持倉（點列＝展開＋選取＋切圖表）
@@ -2220,6 +2225,7 @@ function renderTable(){
   const rangeHint = $("#rangeColHint");
   if(rangeHint) rangeHint.textContent = `(${curRange})`;   // 標明此欄依哪個時間區間計算
   let rows = holdings.map(rowData);
+  rows.forEach(r=>{ r.xirr = fundXirr(r.h); });   // 單檔年化只在表格需要時計算
   if(sortKey){
     rows.sort((a,b)=>{
       let va=a[sortKey], vb=b[sortKey];
@@ -2249,6 +2255,7 @@ function renderTable(){
       <td class="amt ${clsOf(d.pl??0)}">${d.pl!=null?signed(d.pl,0):"—"}</td>
       <td class="amt">${d.div>0?fmtN(d.div,0):"—"}</td>
       <td class="${clsOf(d.plPct??0)}">${d.plPct!=null?signed(d.plPct,2,"%"):"—"}</td>
+      <td class="${clsOf(d.xirr??0)}" title="金額加權年化報酬">${d.xirr!=null?signed(d.xirr*100,2,"%"):"—"}</td>
       <td class="${clsOf(d.rangePct??0)}">${d.rangePct!=null?signed(d.rangePct,2,"%"):"—"}</td>
       <td class="operation-cell"><span class="rowBtns">
         <button data-act="buy" data-id="${hid}" title="新增買入">＋買入</button>
@@ -2289,6 +2296,7 @@ function renderMobileList(rows){
         ${field("現值", fmtN(d.value,0), "amt")}
         ${field("當日漲跌", d.dayChg!=null?`<span class="${clsOf(d.dayChg)}">${signed(d.dayChg, d.nav>=100?2:4)}（${signed(d.dayChgPct,2,"%")}）</span>`:"—")}
         ${field("配息", d.div>0?fmtN(d.div,0):"—", "amt")}
+        ${field("年化(XIRR)", d.xirr!=null?`<span class="${clsOf(d.xirr)}">${signed(d.xirr*100,2,"%")}</span>`:"—")}
         ${field(`區間報酬(${esc(curRange)})`, d.rangePct!=null?`<span class="${clsOf(d.rangePct)}">${signed(d.rangePct,2,"%")}</span>`:"—")}
       </div>
       ${holdingPriceMetaHtml(h,d.navDate)}
