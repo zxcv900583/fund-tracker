@@ -63,6 +63,7 @@ const source = [
   extractFunction("positionOf"),
   extractFunction("unitsOnDate"),
   extractFunction("detectStockDividends"),
+  extractFunction("shadowPortfolioSeries"),
   extractFunction("schedDateFor"),
   extractFunction("nextSched"),
   extractFunction("findNavInList"),
@@ -79,7 +80,7 @@ const source = [
   extractFunction("sanitizeImportedNavCache"),
 ].join("\n");
 
-const lib = new Function(`"use strict";\n${source}\nreturn {xirr, positionOf, unitsOnDate, detectStockDividends, schedDateFor, nextSched, findNavInList, navOnOrBefore, cleanPrice, cleanAmount, csvNormType, csvNormDate, parseCsv, frTxnType, frTxnEntries, sanitizeImportedHoldings, sanitizeImportedNavCache, purCost, addDays};`)();
+const lib = new Function(`"use strict";\n${source}\nreturn {xirr, positionOf, unitsOnDate, detectStockDividends, shadowPortfolioSeries, schedDateFor, nextSched, findNavInList, navOnOrBefore, cleanPrice, cleanAmount, csvNormType, csvNormDate, parseCsv, frTxnType, frTxnEntries, sanitizeImportedHoldings, sanitizeImportedNavCache, purCost, addDays};`)();
 
 let passed = 0;
 function check(name, fn) {
@@ -156,6 +157,43 @@ check("positionOf 空持倉", () => {
   assert.equal(p.held, 0);
   assert.equal(p.avgCost, null);
   assert.equal(p.grossInvested, 0);
+});
+
+/* ---------------- 影子組合（組合 vs 大盤，v1.38） ---------------- */
+const bench = [
+  { date: "2025-01-01", nav: 10 },
+  { date: "2025-06-01", nav: 20 },
+  { date: "2025-07-01", nav: 25 },
+  { date: "2025-12-01", nav: 25 },
+];
+check("shadow 分批投入累積單位", () => {
+  // 投 1000@10=100u，再投 1000@20=50u，共 150u；顯示日 nav 25 → 3750
+  const v = lib.shadowPortfolioSeries(
+    [{ date: "2025-01-01", invest: 1000 }, { date: "2025-06-01", invest: 1000 }],
+    bench, ["2025-01-01", "2025-06-01", "2025-12-01"]);
+  assert.deepEqual(v, [1000, 3000, 3750]);   // 100u×10 / 150u×20 / 150u×25
+});
+check("shadow 賣出扣減等額單位", () => {
+  // 投 1000@10=100u；2025-07-01 收回 500，當時 nav 25 → 賣 20u → 80u；12/01 nav 25 → 2000
+  const v = lib.shadowPortfolioSeries(
+    [{ date: "2025-01-01", invest: 1000 }, { date: "2025-07-01", withdraw: 500 }],
+    bench, ["2025-12-01"]);
+  assert.deepEqual(v, [2000]);
+});
+check("shadow 該日或之前最近基準（粗粒度資料）", () => {
+  // 顯示日 2025-03-15 落在 01-01 與 06-01 之間 → 用 01-01 的 nav 10
+  const v = lib.shadowPortfolioSeries([{ date: "2025-01-01", invest: 1000 }], bench, ["2025-03-15"]);
+  assert.deepEqual(v, [1000]);   // 100u × 10
+});
+check("shadow 邊界：資料不足回 null", () => {
+  assert.equal(lib.shadowPortfolioSeries([{ date: "2025-01-01", invest: 100 }], [{ date: "2025-01-01", nav: 10 }], ["2025-01-01"]), null);
+  assert.equal(lib.shadowPortfolioSeries([], bench, []), null);
+});
+check("shadow 賣超不會變負單位", () => {
+  const v = lib.shadowPortfolioSeries(
+    [{ date: "2025-01-01", invest: 1000 }, { date: "2025-07-01", withdraw: 99999 }],
+    bench, ["2025-12-01"]);
+  assert.deepEqual(v, [0]);
 });
 
 /* ---------------- 股票除息偵測（v1.30） ---------------- */
