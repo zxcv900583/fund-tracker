@@ -72,6 +72,12 @@ tbody td:first-child{text-align:left;max-width:240px;overflow:hidden;text-overfl
 tbody tr{cursor:pointer;transition:background .12s}
 tbody tr:hover{background:var(--hover)}
 tbody tr.sel{background:var(--sel)}
+tbody tr.closed-toggle{cursor:pointer}
+tbody tr.closed-toggle:hover{background:var(--hover)}
+tbody tr.closed-toggle td{text-align:left;color:var(--muted);font-size:13px;background:var(--panel2);padding:7px 10px}
+tbody tr.closed-toggle .arr{font-size:11px;margin-right:4px}
+.m-closed-toggle{cursor:pointer;padding:9px 12px;color:var(--muted);font-size:13px;background:var(--panel2);border-bottom:1px solid var(--border)}
+.m-closed-toggle .arr{font-size:11px;margin-right:4px}
 .unitsCell{text-decoration:underline dotted;text-underline-offset:3px}
 .rowBtns{display:inline-flex;gap:4px}
 .rowBtns button{border:1px solid var(--border);background:var(--panel2);color:var(--text);border-radius:5px;font-size:12px;padding:5px 8px;min-height:30px}
@@ -881,6 +887,13 @@ body[data-private="true"] #timelineBody .amt{filter:blur(7px);transition:filter 
          記錄 settings._lastBackup，顯示「上次備份：N 天前」，≥30 天或未備份
          以琥珀色提醒，不彈窗不打擾）、下半「基富通報表(CSV)」原封不動。
          header 6 鈕減為 4 鈕；_lastBackup 進匯入白名單。
+   v1.37 三項（已出清收合＋匯出修正＋XIRR 提示）：①已出清持倉（全數賣出、
+         0 股但曾投入）折疊成「已出清（N）· 已實現損益」一列，點開才展開，桌面
+         與手機皆有；showClosed 持久化；觀察持倉仍留在上方。②A2 修正：buildFrCsv
+         匯出改用 positionOf 的剩餘成本（pos.basis）而非累計買入，有賣出時本金與
+         參考損益不再失真；已出清不列入庫存彙總；手續費依持有比例分攤。③XIRR 顯示
+         「—」時桌面 tooltip、手機小字說明原因（記錄不足／期間<7天／缺現值／
+         超出範圍），對應 xirr() 各 null 分支；抽出 fundFlows/xirrReason。
    v1.32 手機欄位分級（B）：手機隱藏 11 欄表格（不再橫向捲動），改收合列
          （名稱＋徽章／現價＋當日%／損益＋報酬率%）；點列＝展開＋選取＋切圖表
          三效合一（再點同列收合），展開面板含 6 欄完整數據、淨值日/交易時段與
@@ -989,6 +1002,7 @@ const SORT_KEYS = ["name","nav","dayChg","units","cost","value","pl","div","plPc
 let sortKey = SORT_KEYS.includes(settings.sortKey) ? settings.sortKey : null;   // 記憶上次排序
 let sortAsc = settings.sortAsc !== false;
 let mobileExpandedId = null;   // 手機清單目前展開的持倉（點列＝展開＋選取＋切圖表）
+let showClosed = settings.showClosed === true;   // 已出清持倉群組展開狀態
 let chart = null;                  // 主圖（基金/股票、組合、比較共用同一個 canvas）
 let allocChart = null;             // 資產配置圓餅圖（獨立彈窗，與主圖無關）
 let marketCache = lsGet(LS_MARKET_CACHE, {quotes:{}, fetchedAt:null});
@@ -2191,14 +2205,27 @@ function rowData(h){
 }
 
 // 單一基金 XIRR（計價幣別；買入為負現金流、賣出/配息/目前現值為正）
-function fundXirr(h){
+function fundFlows(h){
   const flows = [];
   h.purchases.forEach(p=>{ const c=purCost(p); if(c>0) flows.push({date:p.date, amt:-c}); });
   (h.sells||[]).forEach(s=>{ const pr=(+s.units||0)*(+s.price||0)-(+s.fee||0); if(pr>0) flows.push({date:s.date, amt:pr}); });
   (h.dividends||[]).forEach(d=>{ if(+d.amount>0) flows.push({date:d.date, amt:+d.amount}); });
   const l = latest(h), pos = positionOf(h);
   if(l && pos.held>0) flows.push({date:todayStr(), amt:pos.held*l.nav});
-  return xirr(flows);
+  return flows;
+}
+function fundXirr(h){ return xirr(fundFlows(h)); }
+// XIRR 顯示「—」時的原因說明（供 tooltip）：對應 xirr() 各個回傳 null 的分支
+function xirrReason(h){
+  if(!(h.purchases||[]).some(p=>purCost(p)>0)) return "尚無買入成本";
+  if(positionOf(h).held>0 && !latest(h)) return "尚無現值可計算（請按「更新淨值」）";
+  const flows = fundFlows(h);
+  if(flows.length<2) return "交易記錄不足，無法計算年化";
+  const fs = [...flows].sort((a,b)=>a.date.localeCompare(b.date));
+  const spanYrs = (new Date(fs.at(-1).date+"T00:00:00")-new Date(fs[0].date+"T00:00:00"))/31557600000;
+  if(spanYrs < 0.019) return "投入期間不足 7 天，年化暫不計算";
+  if(!fs.some(f=>f.amt>0)) return "尚無現值可計算（請按「更新淨值」）";
+  return "年化超出可計算範圍（多因日期不真實或期間過短，可修正買入日期）";
 }
 
 /* ---------------- 渲染：表格/摘要 ---------------- */
@@ -2248,18 +2275,41 @@ function renderTable(){
       return sortAsc?va-vb:vb-va;
     });
   }
-  tb.innerHTML = rows.map(d=>{
-    const sel = d.h.id===selectedId?" class=\"sel\"":"";
-    const dayTxt = d.dayChg!=null ? `<span class="${clsOf(d.dayChg)}">${signed(d.dayChg, d.nav>=100?2:4)}<br><span class="subTxt ${clsOf(d.dayChg)}">${signed(d.dayChgPct,2,"%")}</span></span>` : "—";
-    const assetBadge = d.h.assetType==="stock"
-      ? '<span class="badge LUMP">股票</span> '
-      : '<span class="badge FUND">基金</span> ';
-    const pos = positionOf(d.h);
-    const posBadge = (pos.held===0 && pos.grossInvested===0) ? '<span class="badge WATCH">觀察</span> '
-      : (pos.held===0 && pos.grossInvested>0) ? '<span class="badge CLOSED">已出清</span> '
-      : '';
-    const hid = esc(d.h.id);
-    return `<tr data-id="${hid}"${sel}>
+  // 已出清（全數賣出、無持股）折疊成一群：不佔版面，點開才展開；觀察持倉（未投入）仍留在上方
+  const active = rows.filter(d=>!isClosedRow(d));
+  const closed = rows.filter(d=>isClosedRow(d));
+  let html = active.map(rowHtml).join("");
+  if(closed.length){
+    const realizedTwd = closed.reduce((s,d)=>s+(d.realized||0)*fxOf(d.h),0);
+    html += `<tr class="closed-toggle" data-toggle-closed="1"><td colspan="12">`
+      + `<span class="arr">${showClosed?"▾":"▸"}</span> 已出清（${closed.length}）`
+      + `<span class="subTxt"> · 已實現損益 <span class="amt ${clsOf(realizedTwd)}">${signed(realizedTwd,0)}</span> TWD</span></td></tr>`;
+    if(showClosed) html += closed.map(rowHtml).join("");
+  }
+  tb.innerHTML = html;
+  // sort arrows
+  document.querySelectorAll("thead th").forEach(th=>{
+    const a = th.querySelector(".arr"); if(!a) return;
+    a.textContent = th.dataset.k===sortKey ? (sortAsc?"▲":"▼") : "";
+  });
+  renderMobileList(active, closed);
+}
+
+// 已出清＝曾投入但目前 0 股（觀察持倉未投入，不算已出清）
+function isClosedRow(d){ const pos=positionOf(d.h); return pos.held===0 && pos.grossInvested>0; }
+
+function rowHtml(d){
+  const sel = d.h.id===selectedId?" class=\"sel\"":"";
+  const dayTxt = d.dayChg!=null ? `<span class="${clsOf(d.dayChg)}">${signed(d.dayChg, d.nav>=100?2:4)}<br><span class="subTxt ${clsOf(d.dayChg)}">${signed(d.dayChgPct,2,"%")}</span></span>` : "—";
+  const assetBadge = d.h.assetType==="stock"
+    ? '<span class="badge LUMP">股票</span> '
+    : '<span class="badge FUND">基金</span> ';
+  const pos = positionOf(d.h);
+  const posBadge = (pos.held===0 && pos.grossInvested===0) ? '<span class="badge WATCH">觀察</span> '
+    : (pos.held===0 && pos.grossInvested>0) ? '<span class="badge CLOSED">已出清</span> '
+    : '';
+  const hid = esc(d.h.id);
+  return `<tr data-id="${hid}"${sel}>
       <td title="${esc(d.h.fundName)}">${assetBadge}${posBadge}${esc(d.h.fundName)}<br><span class="subTxt">${esc(d.h.currency)}${d.h.assetType==="stock"&&d.h.symbol?" · "+esc(d.h.symbol):(d.h.isin?" · "+esc(d.h.isin):"")}</span></td>
       <td><span class="current-price">${fmtN(d.nav, d.nav!=null&&d.nav>=100?2:4)}</span>${holdingPriceMetaHtml(d.h,d.navDate)}</td>
       <td>${dayTxt}</td>
@@ -2269,7 +2319,7 @@ function renderTable(){
       <td class="amt ${clsOf(d.pl??0)}">${d.pl!=null?signed(d.pl,0):"—"}</td>
       <td class="amt">${d.div>0?fmtN(d.div,0):"—"}</td>
       <td class="${clsOf(d.plPct??0)}">${d.plPct!=null?signed(d.plPct,2,"%"):"—"}</td>
-      <td class="${clsOf(d.xirr??0)}" title="金額加權年化報酬">${d.xirr!=null?signed(d.xirr*100,2,"%"):"—"}</td>
+      <td class="${clsOf(d.xirr??0)}" title="${d.xirr!=null?'金額加權年化報酬':esc(xirrReason(d.h))}">${d.xirr!=null?signed(d.xirr*100,2,"%"):'—<span class="subTxt"> ⓘ</span>'}</td>
       <td class="${clsOf(d.rangePct??0)}">${d.rangePct!=null?signed(d.rangePct,2,"%"):"—"}</td>
       <td class="operation-cell"><span class="rowBtns">
         <button data-act="buy" data-id="${hid}" title="新增買入">＋買入</button>
@@ -2278,24 +2328,17 @@ function renderTable(){
         <button data-act="del" data-id="${hid}" title="刪除持倉">🗑</button>
       </span></td>
     </tr>`;
-  }).join("");
-  // sort arrows
-  document.querySelectorAll("thead th").forEach(th=>{
-    const a = th.querySelector(".arr"); if(!a) return;
-    a.textContent = th.dataset.k===sortKey ? (sortAsc?"▲":"▼") : "";
-  });
-  renderMobileList(rows);
 }
 
 /* 手機持倉清單：收合列（名稱/現價/損益）＋點擊展開完整數據與操作 */
-function renderMobileList(rows){
+function renderMobileList(active, closed=[]){
   const list = $("#mobileList");
   const sortSel = $("#mSortKey"), dirBtn = $("#mSortDir");
   if(sortSel){ sortSel.value = sortKey||""; }
   if(dirBtn){ dirBtn.textContent = sortAsc?"↑":"↓"; dirBtn.disabled = !sortKey; }
   if(!list) return;
   const field = (label, value, cls="") => `<div><div class="lbl">${label}</div><div class="v ${cls}">${value}</div></div>`;
-  list.innerHTML = rows.map(d=>{
+  const rowHtmlM = d=>{
     const h = d.h, hid = esc(h.id);
     const expanded = h.id===mobileExpandedId;
     const pos = positionOf(h);
@@ -2310,7 +2353,7 @@ function renderMobileList(rows){
         ${field("現值", fmtN(d.value,0), "amt")}
         ${field("當日漲跌", d.dayChg!=null?`<span class="${clsOf(d.dayChg)}">${signed(d.dayChg, d.nav>=100?2:4)}（${signed(d.dayChgPct,2,"%")}）</span>`:"—")}
         ${field("配息", d.div>0?fmtN(d.div,0):"—", "amt")}
-        ${field("年化(XIRR)", d.xirr!=null?`<span class="${clsOf(d.xirr)}">${signed(d.xirr*100,2,"%")}</span>`:"—")}
+        ${field("年化(XIRR)", d.xirr!=null?`<span class="${clsOf(d.xirr)}">${signed(d.xirr*100,2,"%")}</span>`:`—<div class="subTxt" style="font-size:9.5px;line-height:1.3;white-space:normal">${esc(xirrReason(h))}</div>`)}
         ${field(`區間報酬(${esc(curRange)})`, d.rangePct!=null?`<span class="${clsOf(d.rangePct)}">${signed(d.rangePct,2,"%")}</span>`:"—")}
       </div>
       ${holdingPriceMetaHtml(h,d.navDate)}
@@ -2332,7 +2375,16 @@ function renderMobileList(rows){
       </div>
       ${detail}
     </div>`;
-  }).join("");
+  };
+  let html = active.map(rowHtmlM).join("");
+  if(closed.length){
+    const realizedTwd = closed.reduce((s,d)=>s+(d.realized||0)*fxOf(d.h),0);
+    html += `<div class="m-closed-toggle" data-toggle-closed="1">`
+      + `<span class="arr">${showClosed?"▾":"▸"}</span> 已出清（${closed.length}）`
+      + `<span class="subTxt"> · 已實現 <span class="amt ${clsOf(realizedTwd)}">${signed(realizedTwd,0)}</span></span></div>`;
+    if(showClosed) html += closed.map(rowHtmlM).join("");
+  }
+  list.innerHTML = html;
 }
 
 /* ---------------- 渲染：圖表 ---------------- */
@@ -3192,7 +3244,7 @@ function doImport(file){
       if(d.settings && typeof d.settings==="object"){
         // 僅複製已知設定欄位，避免原型污染與垃圾欄位（新增 settings 欄位時記得同步這裡）
         ["defaultChartRange","currency","refreshOnOpen","theme","swapGainLossColors","privacyMode",
-         "sortKey","sortAsc","_lastBackup","marketSymbols","compareFundIds","marketRange",
+         "sortKey","sortAsc","showClosed","_lastBackup","marketSymbols","compareFundIds","marketRange",
          "_lastRefresh","_lastRefreshAttempt","_lastDataRefresh","_lastFundDateRange"]
           .forEach(k=>{ if(Object.prototype.hasOwnProperty.call(d.settings,k)) settings[k]=d.settings[k]; });
         settings.theme = d.settings.theme==="dark" ? "dark" : "light";
@@ -3801,15 +3853,22 @@ function buildFrCsv(){
   const pc = v => v==null||isNaN(v) ? "--" : (+v).toFixed(2);
   const header = "基金代碼,基金名稱,投資本金,庫存單位數,可贖回單位數,參考市值（幣別）,參考市值,參考損益（幣別）,參考損益(含息含手續費),參考損益(含息不含手續費),參考損益(不含息含手續費),參考損益(不含息不含手續費),報酬率(含息含手續費),報酬率(含息不含手續費),報酬率(不含息含手續費),報酬率(不含息不含手續費),計價幣別,最新淨值（幣別）,最新淨值,淨值日期,交易幣別,累積配息金額（幣別）,累積配息金額,參考匯率,平均申購淨值（幣別）,平均申購淨值,台幣本金(不含息不含手續費)";
   const lines = holdings.filter(h=>h.assetType!=="stock").map(h=>{
-    const l = latest(h), units = totUnits(h);
-    const principal = h.purchases.reduce((s,p)=>s+((p.amount!=null&&+p.amount>0)?+p.amount:(+p.units||0)*(+p.navAtPurchase||0)),0);
-    const fees = h.purchases.reduce((s,p)=>s+(+p.fee||0),0);
+    const pos = positionOf(h);
+    if(pos.held<=0) return null;   // 庫存彙總只列目前持有部位（已出清不匯出）
+    const l = latest(h), units = pos.held;
+    // A2 修正：本金用「持有部位剩餘成本」(pos.basis) 而非累計買入——有賣出時兩者不同，
+    // 原本用累計買入配持有單位會使參考損益/報酬率失真
+    const principal = pos.basis;                                    // 含手續費的剩餘成本
+    const grossBought = h.purchases.reduce((s,p)=>s+(+p.units||0),0);
+    const totFees = h.purchases.reduce((s,p)=>s+(+p.fee||0),0);
+    const heldFees = grossBought>0 ? totFees*(units/grossBought) : 0;   // 依持有比例分攤手續費
+    const principalNoFee = Math.max(0, principal - heldFees);
     const div = totDiv(h);
-    const value = (l&&units>0) ? units*l.nav : null;
+    const value = l ? units*l.nav : null;
     const avg = avgNav(h), fx = fxOf(h);
     const curName = (FR_CURNAME[h.currency]||h.currency)+" "+h.currency;
-    const pl = (incDiv,incFee)=> value==null ? null : value+(incDiv?div:0)-principal-(incFee?fees:0);
-    const rt = (incDiv,incFee)=>{ const v=pl(incDiv,incFee), base=principal+(incFee?fees:0); return (v!=null&&base>0)? v/base*100 : null; };
+    const pl = (incDiv,incFee)=> value==null ? null : value+(incDiv?div:0)-(incFee?principal:principalNoFee);
+    const rt = (incDiv,incFee)=>{ const v=pl(incDiv,incFee), base=(incFee?principal:principalNoFee); return (v!=null&&base>0)? v/base*100 : null; };
     const navDateTxt = l ? (d=>`${+d[0]}/${+d[1]}/${+d[2]}`)(l.date.split("-")) : "--";
     return [
       "'"+(h.isin||h.fundCode), q(h.fundName),
@@ -3820,7 +3879,7 @@ function buildFrCsv(){
       curName, h.currency, l?l.nav:"--", navDateTxt, curName,
       h.currency, n0(div), +(+fx).toFixed(4), h.currency, avg!=null?+avg.toFixed(4):"--", n0(principal*fx)
     ].join(",");
-  });
+  }).filter(Boolean);
   return "﻿"+header+"\r\n"+lines.join("\r\n")+"\r\n";
 }
 function frExportCsv(){
@@ -3982,9 +4041,11 @@ function rowAction(act, id){
   else if(act==="buy"){ openMng(id); openPurEdit(null); }
   else if(act==="cmp") enterCompareView(null,id);
 }
+function toggleClosed(){ showClosed = !showClosed; settings.showClosed = showClosed; lsSet(LS_S,settings); renderTable(); }
 $("#tbody").onclick = e=>{
   const btn = e.target.closest("button[data-act]");
   if(btn){ rowAction(btn.dataset.act, btn.dataset.id); return; }
+  if(e.target.closest("[data-toggle-closed]")){ toggleClosed(); return; }
   const tr = e.target.closest("tr[data-id]");
   if(tr){
     if(e.target.classList.contains("unitsCell")){ openMng(tr.dataset.id); return; }
@@ -4001,6 +4062,7 @@ $("#tbody").addEventListener("contextmenu", e=>{
 $("#mobileList").onclick = e=>{
   const btn = e.target.closest("button[data-act]");
   if(btn){ rowAction(btn.dataset.act, btn.dataset.id); return; }
+  if(e.target.closest("[data-toggle-closed]")){ toggleClosed(); return; }
   const head = e.target.closest(".m-head");
   if(!head) return;
   const id = head.closest(".m-row").dataset.id;
